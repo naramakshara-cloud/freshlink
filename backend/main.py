@@ -152,6 +152,20 @@ class UserSignup(BaseModel):
     phone:     str
     role:      str  # "donor" | "receiver"
 
+    # Profile details
+    address:               Optional[str] = None
+    latitude:              Optional[float] = None
+    longitude:             Optional[float] = None
+
+    # Donor fields
+    donor_type:            Optional[str] = "other"  # hostel, canteen, household, restaurant, event, other
+
+    # Receiver fields
+    receiver_type:         Optional[str] = "individual_or_family"  # individual_or_family, ngo, animal_shelter, orphanage, old_age_home, community_kitchen
+    daily_capacity_kg:     Optional[float] = None
+    feed_count:            Optional[int] = None
+    has_refrigeration:     Optional[bool] = False
+
 class UserLogin(BaseModel):
     email:    str
     password: str
@@ -192,6 +206,10 @@ def signup(data: UserSignup, response: Response):
     if existing:
         raise HTTPException(status_code=400, detail="Email is already registered.")
 
+    lat = data.latitude if data.latitude is not None else 12.9716
+    lng = data.longitude if data.longitude is not None else 77.5946
+    addr = data.address.strip() if data.address else "Bengaluru"
+
     pwd_hash = hash_password(data.password)
     new_user = query(
         """
@@ -202,6 +220,34 @@ def signup(data: UserSignup, response: Response):
         (data.email.strip().lower(), pwd_hash, data.full_name.strip(), data.phone.strip(), data.role),
         fetch="one"
     )
+
+    user_id = new_user["user_id"]
+
+    # Create associated profile record
+    if data.role == "donor":
+        dtype = data.donor_type if data.donor_type in ("hostel", "canteen", "household", "restaurant", "event", "other") else "other"
+        query(
+            """
+            INSERT INTO donors (user_id, name, donor_type, contact_phone, email, address, location, is_verified)
+            VALUES (%s, %s, %s, %s, %s, %s, ST_MakePoint(%s, %s)::geography, TRUE)
+            """,
+            (user_id, data.full_name.strip(), dtype, data.phone.strip(), data.email.strip().lower(), addr, lng, lat),
+            fetch=None
+        )
+    elif data.role == "receiver":
+        rtype = data.receiver_type if data.receiver_type in ("individual_or_family", "ngo", "animal_shelter", "orphanage", "old_age_home", "community_kitchen") else "individual_or_family"
+        cap = data.daily_capacity_kg
+        if cap is None:
+            cap = 5.0 if rtype == "individual_or_family" else 50.0
+
+        query(
+            """
+            INSERT INTO receivers (user_id, name, receiver_type, verification_status, contact_phone, email, address, location, service_radius_km, daily_capacity_kg, has_refrigeration, is_active)
+            VALUES (%s, %s, %s, 'approved', %s, %s, %s, ST_MakePoint(%s, %s)::geography, 5.0, %s, %s, TRUE)
+            """,
+            (user_id, data.full_name.strip(), rtype, data.phone.strip(), data.email.strip().lower(), addr, lng, lat, cap, bool(data.has_refrigeration)),
+            fetch=None
+        )
 
     token = create_access_token({"sub": str(new_user["user_id"]), "role": new_user["role"], "email": new_user["email"]})
     response.set_cookie(

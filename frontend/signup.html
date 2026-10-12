@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FreshLink – Sign Up</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Leaflet CSS for OpenStreetMap Pin Drop -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+</head>
+<body>
+  <nav class="navbar">
+    <span class="logo">🌿 FreshLink</span>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="donor.html">Post Food</a>
+      <a href="ngo.html">Receiver Dashboard</a>
+      <a href="login.html">Login</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <div id="toast" class="toast hidden"></div>
+
+    <div class="card auth-container" style="max-width:620px">
+      <h1 style="font-size:1.6rem;margin-bottom:.5rem;text-align:center">Join FreshLink</h1>
+      <p style="color:var(--gray-600);text-align:center;font-size:.9rem;margin-bottom:1.25rem">
+        Create your account to start donating surplus food or receiving meals.
+      </p>
+
+      <!-- Role Selector Tabs -->
+      <div class="auth-tabs">
+        <div class="auth-tab active" id="tabDonor" onclick="selectRole('donor')">
+          🥗 I Want to Donate Food
+        </div>
+        <div class="auth-tab" id="tabReceiver" onclick="selectRole('receiver')">
+          🤝 I Need Food (Receiver)
+        </div>
+      </div>
+
+      <form id="signupForm">
+        <input type="hidden" id="selectedRole" value="donor" />
+
+        <!-- Common User Account Details -->
+        <div class="form-grid" style="grid-template-columns:1fr 1fr;margin-bottom:1rem">
+          <div class="form-group full-width">
+            <label for="fullName">Full Name / Organisation Name</label>
+            <input type="text" id="fullName" placeholder="e.g. Green Valley Hostel / Annapurna Trust" required />
+          </div>
+
+          <div class="form-group">
+            <label for="email">Email Address</label>
+            <input type="email" id="email" placeholder="e.g. contact@example.org" required />
+          </div>
+
+          <div class="form-group">
+            <label for="phone">Phone Number</label>
+            <input type="tel" id="phone" placeholder="e.g. 9876543210" required />
+          </div>
+
+          <div class="form-group full-width">
+            <label for="password">Password (min 6 characters)</label>
+            <input type="password" id="password" minlength="6" placeholder="••••••••" required />
+          </div>
+        </div>
+
+        <!-- ── Donor-Specific Fields ────────────────── -->
+        <div id="donorFields">
+          <div class="form-group" style="margin-bottom:1rem">
+            <label for="donorType">Donor Type</label>
+            <select id="donorType">
+              <option value="hostel">Hostel (Student / Working)</option>
+              <option value="canteen">Campus / Office Canteen</option>
+              <option value="restaurant">Restaurant / Bakery</option>
+              <option value="household">Household / Family</option>
+              <option value="event">Wedding / Event Hall</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- ── Receiver-Specific Fields ──────────────── -->
+        <div id="receiverFields" style="display:none">
+          <div class="form-grid" style="grid-template-columns:1fr 1fr;margin-bottom:1rem">
+            <div class="form-group full-width">
+              <label for="receiverType">Receiver Category</label>
+              <select id="receiverType">
+                <option value="individual_or_family">Individual / Family (Personal Need)</option>
+                <option value="ngo">Registered NGO / Charity Trust</option>
+                <option value="animal_shelter">Animal Shelter / Pet Rescue</option>
+                <option value="orphanage">Orphanage / Children's Home</option>
+                <option value="old_age_home">Old Age Home / Elder Care</option>
+                <option value="community_kitchen">Community / Soup Kitchen</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="feedCount">People / Animals Fed Daily</label>
+              <input type="number" id="feedCount" min="1" placeholder="e.g. 40" />
+            </div>
+
+            <div class="form-group">
+              <label for="dailyCap">Daily Capacity (kg)</label>
+              <input type="number" id="dailyCap" step="0.5" placeholder="Default: 5kg family / 50kg org" />
+            </div>
+
+            <div class="form-group full-width">
+              <label for="hasFridge">Cold Storage / Refrigeration?</label>
+              <select id="hasFridge">
+                <option value="false">No Refrigeration</option>
+                <option value="true">Yes, Refrigerator / Chiller Available</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Location & Leaflet Map ──────────────────── -->
+        <div class="form-group" style="margin-bottom:.75rem">
+          <label for="address">Street Address / Landmark</label>
+          <input type="text" id="address" placeholder="e.g. 12th Main, Indiranagar, Bengaluru" required />
+        </div>
+
+        <div class="map-picker-container">
+          <div class="map-controls">
+            <span>📍 Pinpoint Location on Map:</span>
+            <button type="button" class="btn btn-secondary" id="btnGeolocate">
+              🎯 Use My Current Location
+            </button>
+          </div>
+          <div id="map" class="map-box"></div>
+          <input type="hidden" id="lat" value="12.9716" />
+          <input type="hidden" id="lng" value="77.5946" />
+          <span style="font-size:.78rem;color:var(--gray-400)">Click anywhere on the map to drag or reposition your pin.</span>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-lg" id="submitSignupBtn" style="width:100%;margin-top:1.5rem">
+          🚀 Complete Registration
+        </button>
+      </form>
+
+      <div style="margin-top:1.25rem;text-align:center;font-size:.875rem;color:var(--gray-600)">
+        Already have an account? <a href="login.html" style="color:var(--green);font-weight:600;text-decoration:none">Log in here</a>
+      </div>
+    </div>
+  </main>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="api.js"></script>
+  <script>
+    // ── Role Tab Toggle ──────────────────────────────────────
+    function selectRole(role) {
+      document.getElementById('selectedRole').value = role;
+      const tabDonor = document.getElementById('tabDonor');
+      const tabReceiver = document.getElementById('tabReceiver');
+      const donorFields = document.getElementById('donorFields');
+      const receiverFields = document.getElementById('receiverFields');
+
+      if (role === 'donor') {
+        tabDonor.classList.add('active');
+        tabReceiver.classList.remove('active');
+        donorFields.style.display = 'block';
+        receiverFields.style.display = 'none';
+      } else {
+        tabReceiver.classList.add('active');
+        tabDonor.classList.remove('active');
+        donorFields.style.display = 'none';
+        receiverFields.style.display = 'block';
+      }
+    }
+
+    // Read ?role= from URL query param if present
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('role') === 'receiver') {
+      selectRole('receiver');
+    }
+
+    // ── Leaflet OpenStreetMap Pin Dropper ─────────────────────
+    let map, marker;
+    const defaultLat = 12.9716; // Bengaluru default
+    const defaultLng = 77.5946;
+
+    function initMap() {
+      map = L.map('map').setView([defaultLat, defaultLng], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap'
+      }).addTo(map);
+
+      marker = L.marker([defaultLat, defaultLng], { draggable: true }).addTo(map);
+
+      marker.on('dragend', function (e) {
+        const pos = e.target.getLatLng();
+        setCoords(pos.lat, pos.lng);
+      });
+
+      map.on('click', function (e) {
+        marker.setLatLng(e.latlng);
+        setCoords(e.latlng.lat, e.latlng.lng);
+      });
+    }
+
+    function setCoords(lat, lng) {
+      document.getElementById('lat').value = lat.toFixed(6);
+      document.getElementById('lng').value = lng.toFixed(6);
+    }
+
+    // Geolocate button
+    document.getElementById('btnGeolocate').addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        showToast('Geolocation is not supported by your browser.', 'error');
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          map.setView([lat, lng], 15);
+          marker.setLatLng([lat, lng]);
+          setCoords(lat, lng);
+          showToast('📍 Updated map to current location!');
+        },
+        () => {
+          showToast('Could not retrieve GPS location.', 'error');
+        }
+      );
+    });
+
+    window.addEventListener('DOMContentLoaded', initMap);
+
+    // ── Signup Form Submit ───────────────────────────────────
+    document.getElementById('signupForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const role = document.getElementById('selectedRole').value;
+      const full_name = document.getElementById('fullName').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const phone = document.getElementById('phone').value.trim();
+      const password = document.getElementById('password').value;
+      const address = document.getElementById('address').value.trim();
+      const latitude = parseFloat(document.getElementById('lat').value);
+      const longitude = parseFloat(document.getElementById('lng').value);
+
+      const submitBtn = document.getElementById('submitSignupBtn');
+      submitBtn.disabled = true;
+      submitBtn.textContent = '⏳ Registering…';
+
+      const payload = {
+        role,
+        full_name,
+        email,
+        phone,
+        password,
+        address,
+        latitude,
+        longitude
+      };
+
+      if (role === 'donor') {
+        payload.donor_type = document.getElementById('donorType').value;
+      } else {
+        payload.receiver_type = document.getElementById('receiverType').value;
+        const feed = parseInt(document.getElementById('feedCount').value);
+        if (!isNaN(feed)) payload.feed_count = feed;
+        const cap = parseFloat(document.getElementById('dailyCap').value);
+        if (!isNaN(cap)) payload.daily_capacity_kg = cap;
+        payload.has_refrigeration = document.getElementById('hasFridge').value === 'true';
+      }
+
+      try {
+        const res = await apiFetch('/auth/signup', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        showToast('🎉 Account registered successfully! Redirecting…');
+        setTimeout(() => {
+          if (role === 'donor') {
+            window.location.href = 'donor.html';
+          } else {
+            window.location.href = 'ngo.html';
+          }
+        }, 1000);
+      } catch (err) {
+        showToast(err.message, 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = '🚀 Complete Registration';
+      }
+    });
+  </script>
+</body>
+</html>

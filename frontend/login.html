@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FreshLink – Login</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <span class="logo">🌿 FreshLink</span>
+    <div class="nav-links">
+      <a href="index.html">Home</a>
+      <a href="donor.html">Post Food</a>
+      <a href="ngo.html">Receiver Dashboard</a>
+      <a href="impact.html">Impact</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <div id="toast" class="toast hidden"></div>
+
+    <div class="card auth-container">
+      <h1 style="font-size:1.6rem;margin-bottom:.5rem;text-align:center">Welcome Back</h1>
+      <p style="color:var(--gray-600);text-align:center;font-size:.9rem;margin-bottom:1.5rem">
+        Log in to access your donor or receiver dashboard.
+      </p>
+
+      <form id="loginForm">
+        <div class="form-group" style="margin-bottom:1rem">
+          <label for="loginEmail">Email Address</label>
+          <input type="email" id="loginEmail" placeholder="e.g. hostel.a@college.edu" required />
+        </div>
+
+        <div class="form-group" style="margin-bottom:1.25rem">
+          <label for="loginPassword">Password</label>
+          <input type="password" id="loginPassword" placeholder="••••••••" required />
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-lg" id="loginBtn" style="width:100%">
+          🔑 Sign In
+        </button>
+      </form>
+
+      <div style="margin-top:1.5rem;text-align:center;font-size:.875rem;color:var(--gray-600);border-top:1px solid var(--gray-100);padding-top:1.25rem">
+        Don't have an account? <a href="signup.html" style="color:var(--green);font-weight:600;text-decoration:none">Sign up here</a>
+      </div>
+
+      <div style="margin-top:1rem;background:var(--gray-50);padding:.75rem;border-radius:8px;font-size:.8rem;color:var(--gray-600)">
+        <strong>Quick Demo Logins</strong> (Password: <code>DemoPass123!</code>):<br />
+        • Donor: <code>hostel.a@college.edu</code><br />
+        • Receiver: <code>annapurna@trust.org</code><br />
+        • Admin: <code>admin@freshlink.org</code>
+      </div>
+    </div>
+  </main>
+
+  <script src="api.js"></script>
+  <script>
+    const form = document.getElementById('loginForm');
+    const btn = document.getElementById('loginBtn');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+
+      btn.disabled = true;
+      btn.textContent = '⏳ Signing in…';
+
+      try {
+        const res = await apiFetch('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email, password }),
+        });
+
+        showToast('✅ Login successful! Redirecting…');
+        setTimeout(() => {
+          if (res.user.role === 'donor') {
+            window.location.href = 'donor.html';
+          } else if (res.user.role === 'receiver') {
+            window.location.href = 'ngo.html';
+          } else {
+            window.location.href = 'impact.html';
+          }
+        }, 800);
+      } catch (err) {
+        showToast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = '🔑 Sign In';
+      }
+    });
+  </script>
+</body>
+</html>
