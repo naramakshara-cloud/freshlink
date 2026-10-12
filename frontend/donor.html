@@ -88,6 +88,35 @@
             <label for="expiresAt">Donor Expiry Time</label>
             <input type="datetime-local" id="expiresAt" required />
           </div>
+
+          <!-- Diet & Animal Safety -->
+          <div class="form-group">
+            <label for="isVegSelect">Dietary Type</label>
+            <select id="isVegSelect">
+              <option value="true">🌱 Vegetarian</option>
+              <option value="false">🍖 Non-Vegetarian</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="animalSelect">Animal Shelter Suitable?</label>
+            <select id="animalSelect">
+              <option value="false">❌ No (Humans Only)</option>
+              <option value="true">🐾 Yes (Safe for Animals/Pets)</option>
+            </select>
+          </div>
+
+          <!-- Allergens -->
+          <div class="form-group full-width">
+            <label for="allergensInput">Allergens <span class="optional">(optional, e.g. Dairy, Peanuts, Gluten)</span></label>
+            <input type="text" id="allergensInput" placeholder="e.g. Contains dairy, peanuts" />
+          </div>
+
+          <!-- Pickup instructions -->
+          <div class="form-group full-width">
+            <label for="pickupInstInput">Pickup Instructions & Location Details</label>
+            <input type="text" id="pickupInstInput" placeholder="e.g. Collect at counter #2, ask for chef Ramesh" />
+          </div>
         </div>
 
         <!-- Freshness preview -->

@@ -139,9 +139,13 @@ function foodCardHTML(l) {
         <div class="food-card-meta">
           <span>⚖️ ${l.quantity_kg} kg</span>
           <span>📍 ${distKm} km away</span>
-          ${l.servings           ? `<span>🍽️ ~${l.servings} servings</span>`  : ''}
-          ${l.requires_refrigeration ? '<span>❄️ Needs fridge</span>'          : ''}
+          <span>${l.is_veg ? '🌱 Veg' : '🍖 Non-Veg'}</span>
+          ${l.suitable_for_animals ? '<span>🐾 Animal-Safe</span>' : ''}
+          ${l.servings ? `<span>🍽️ ~${l.servings} servings</span>` : ''}
+          ${l.requires_refrigeration ? '<span>❄️ Needs fridge</span>' : ''}
         </div>
+        ${l.allergens ? `<div style="font-size:.78rem;color:var(--gray-600);margin-bottom:.4rem">⚠️ Allergens: ${l.allergens}</div>` : ''}
+        ${l.pickup_instructions ? `<div style="font-size:.78rem;color:var(--gray-600);margin-bottom:.4rem">📌 ${l.pickup_instructions}</div>` : ''}
         <span class="countdown ${band}" data-expiry="${expiry}">
           ⏱ ${countdown(expiry)}
         </span>
@@ -213,9 +217,13 @@ function matchCardHTML(m) {
       <div class="match-card-meta">
         <span>⚖️ ${parseFloat(m.quantity_kg).toFixed(1)} kg</span>
         <span>📍 ${m.distance_km} km</span>
+        <span>${m.is_veg ? '🌱 Veg' : '🍖 Non-Veg'}</span>
+        ${m.suitable_for_animals ? '<span>🐾 Animal-Safe</span>' : ''}
         <span>⬆ Priority ${m.priority_score}</span>
-        <span>💧 Freshness at match: ${m.freshness_at_match}</span>
+        <span>💧 Freshness: ${m.freshness_at_match}</span>
+        ${m.pickup_code ? `<span style="background:var(--gray-100);padding:.15rem .45rem;border-radius:4px;font-family:monospace;font-weight:700">🔑 Code: ${m.pickup_code}</span>` : ''}
       </div>
+      ${m.pickup_instructions ? `<div style="font-size:.82rem;color:var(--gray-600)">📌 ${m.pickup_instructions}</div>` : ''}
       ${buttons ? `<div class="match-card-actions">${buttons}</div>` : ''}
     </div>`;
 }
@@ -291,9 +299,9 @@ async function loadNGOs() {
   try {
     const ngos = await getNGOs();
     ngoSelect.innerHTML =
-      '<option value="">— Select your NGO —</option>' +
+      '<option value="">— Select Receiver / NGO —</option>' +
       ngos.map(n =>
-        `<option value="${n.ngo_id}">${n.name} (radius: ${n.service_radius_km} km)</option>`
+        `<option value="${n.ngo_id}">${n.name} (${(n.receiver_type || 'ngo').replace(/_/g, ' ')}) [cap: ${n.daily_capacity_kg}kg]</option>`
       ).join('');
   } catch (e) {
     showToast(e.message, 'error');

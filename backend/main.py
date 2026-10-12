@@ -20,7 +20,7 @@ env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 load_dotenv()  # fallback for local execution
 
-app = FastAPI(title="FreshLink API", version="1.0")
+app = FastAPI(title="FreshLink API", version="2.0")
 
 # Allow the frontend (any origin during dev) to talk to this server
 app.add_middleware(
@@ -60,32 +60,47 @@ def query(sql: str, params=None, fetch="all"):
 # ── Pydantic models ────────────────────────────────────────────────────────────
 
 class ListingCreate(BaseModel):
-    donor_id:    int
-    category_id: int
-    title:       str
-    description: Optional[str] = None
-    quantity_kg: float
-    servings:    Optional[int] = None
-    prepared_at: str   # ISO datetime string
-    expires_at:  str   # ISO datetime string
+    donor_id:             int
+    category_id:          int
+    title:                str
+    description:          Optional[str] = None
+    quantity_kg:          float
+    servings:             Optional[int] = None
+    prepared_at:          str   # ISO datetime string
+    expires_at:           str   # ISO datetime string
+    is_veg:               Optional[bool] = True
+    allergens:            Optional[str] = None
+    suitable_for_animals: Optional[bool] = False
+    pickup_instructions:  Optional[str] = None
+    pickup_code:          Optional[str] = None
 
 class MatchAction(BaseModel):
     action: str   # "accepted" | "rejected" | "picked_up" | "completed" | "cancelled"
 
 
-# ── ADMIN ──────────────────────────────────────────────────────────────────────
+# ── ADMIN & DEMO RESET ─────────────────────────────────────────────────────────
 
 @app.post("/admin/reset")
 def reset_demo_data():
     """
-    Drop and recreate all tables (schema.sql), then load sample data (seed.sql).
-    Used by the Impact page 'Reset Demo Data' button.
+    Reset demo data safely by loading schema.sql, seed.sql, and demo_seed.sql.
+    Cleans matches/listings and re-inserts fresh demo accounts and listings.
     """
     db_dir = Path(__file__).parent.parent / "database"
     env = os.environ.copy()
     env["PGPASSWORD"] = DB_CONFIG["password"]
 
-    for fname in ["schema.sql", "seed.sql"]:
+    # First clean transient tables to guarantee fresh demo state
+    try:
+        query("DELETE FROM match_history; DELETE FROM matches; DELETE FROM food_listings; DELETE FROM receivers; DELETE FROM donors; DELETE FROM users;", fetch=None)
+    except Exception as e:
+        # Ignore if tables are empty or newly initialized
+        pass
+
+    for fname in ["schema.sql", "seed.sql", "demo_seed.sql"]:
+        fpath = db_dir / fname
+        if not fpath.exists():
+            continue
         result = subprocess.run(
             [
                 "psql",
@@ -93,7 +108,7 @@ def reset_demo_data():
                 "-d", DB_CONFIG["dbname"],
                 "-h", DB_CONFIG["host"],
                 "-p", str(DB_CONFIG["port"]),
-                "-f", str(db_dir / fname),
+                "-f", str(fpath),
             ],
             env=env,
             capture_output=True,
@@ -108,11 +123,19 @@ def reset_demo_data():
     return {"message": "Demo data reset successfully"}
 
 
+# ── USERS ──────────────────────────────────────────────────────────────────────
+
+@app.get("/users")
+def list_users():
+    rows = query("SELECT user_id, email, full_name, phone, role, is_active, created_at FROM users ORDER BY user_id")
+    return [dict(r) for r in rows]
+
+
 # ── DONORS ─────────────────────────────────────────────────────────────────────
 
 @app.get("/donors")
 def list_donors():
-    rows = query("SELECT donor_id, name, donor_type, address FROM donors ORDER BY name")
+    rows = query("SELECT donor_id, user_id, name, donor_type, contact_phone, email, address, is_verified FROM donors ORDER BY name")
     return [dict(r) for r in rows]
 
 
@@ -121,7 +144,7 @@ def list_donors():
 @app.get("/categories")
 def list_categories():
     rows = query(
-        "SELECT category_id, name, requires_refrigeration FROM food_categories ORDER BY name"
+        "SELECT category_id, name, requires_refrigeration, decay_rate, max_safe_hours FROM food_categories ORDER BY name"
     )
     return [dict(r) for r in rows]
 
@@ -135,28 +158,31 @@ def create_listing(body: ListingCreate):
             """
             INSERT INTO food_listings
                 (donor_id, category_id, title, description,
-                 quantity_kg, servings, prepared_at, expires_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            RETURNING listing_id
+                 quantity_kg, servings, prepared_at, expires_at,
+                 is_veg, allergens, suitable_for_animals, pickup_instructions, pickup_code)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING listing_id, pickup_code
             """,
             (body.donor_id, body.category_id, body.title, body.description,
-             body.quantity_kg, body.servings, body.prepared_at, body.expires_at),
+             body.quantity_kg, body.servings, body.prepared_at, body.expires_at,
+             body.is_veg, body.allergens, body.suitable_for_animals, body.pickup_instructions, body.pickup_code),
             fetch="one",
         )
-        return {"listing_id": row["listing_id"], "message": "Listing created"}
+        return {"listing_id": row["listing_id"], "pickup_code": row["pickup_code"], "message": "Listing created"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/listings/available")
 def available_listings():
-    """Live feed used by the NGO dashboard."""
+    """Live feed used by the Receiver / NGO dashboard."""
     rows = query(
         """
         SELECT listing_id, title, donor_name, donor_type, category,
                quantity_kg, servings, prepared_at, effective_expiry,
                hours_left, freshness, urgency, freshness_band,
-               requires_refrigeration
+               requires_refrigeration, is_veg, allergens, suitable_for_animals,
+               pickup_instructions, pickup_code, pickup_window_start, pickup_window_end
         FROM v_available_listings
         ORDER BY hours_left ASC
         """
@@ -164,35 +190,71 @@ def available_listings():
     return [dict(r) for r in rows]
 
 
-# ── NGOs ───────────────────────────────────────────────────────────────────────
-# IMPORTANT: fixed-path routes (/ngos/capacity) MUST come before
-# parameterised routes (/ngos/{ngo_id}/...) to avoid shadowing.
+# ── RECEIVERS (Formerly NGOs) ──────────────────────────────────────────────────
 
+@app.get("/receivers")
+def list_receivers():
+    rows = query(
+        """
+        SELECT receiver_id, user_id, name, receiver_type, verification_status,
+               address, service_radius_km, daily_capacity_kg, has_refrigeration, is_active
+        FROM receivers
+        ORDER BY name
+        """
+    )
+    return [dict(r) for r in rows]
+
+
+@app.get("/receivers/capacity")
+def receiver_capacity():
+    rows = query(
+        """
+        SELECT receiver_id, name, receiver_type, daily_capacity_kg, committed_kg, remaining_kg
+        FROM v_receiver_capacity_today
+        """
+    )
+    return [dict(r) for r in rows]
+
+
+@app.get("/receivers/{receiver_id}/listings")
+def nearby_listings_for_receiver_endpoint(receiver_id: int):
+    """Priority-sorted listings for a specific receiver."""
+    rows = query(
+        "SELECT * FROM nearby_listings_for_receiver(%s)",
+        (receiver_id,)
+    )
+    return [dict(r) for r in rows]
+
+
+# Compatibility aliases for NGO routes
 @app.get("/ngos")
-def list_ngos():
+def list_ngos_alias():
     rows = query(
         """
-        SELECT ngo_id, name, address, service_radius_km,
-               daily_capacity_kg, has_refrigeration, is_active
-        FROM ngos ORDER BY name
+        SELECT receiver_id AS ngo_id, name, receiver_type, verification_status,
+               address, service_radius_km, daily_capacity_kg, has_refrigeration, is_active
+        FROM receivers
+        ORDER BY name
         """
     )
     return [dict(r) for r in rows]
 
 
-@app.get("/ngos/capacity")      # ← fixed path FIRST
-def ngo_capacity():
+@app.get("/ngos/capacity")
+def ngo_capacity_alias():
     rows = query(
-        "SELECT ngo_id, name, daily_capacity_kg, committed_kg, remaining_kg FROM v_ngo_capacity_today"
+        """
+        SELECT receiver_id AS ngo_id, name, daily_capacity_kg, committed_kg, remaining_kg
+        FROM v_receiver_capacity_today
+        """
     )
     return [dict(r) for r in rows]
 
 
-@app.get("/ngos/{ngo_id}/listings")   # ← parameterised path AFTER
-def nearby_listings(ngo_id: int):
-    """Priority-sorted listings for a specific NGO."""
+@app.get("/ngos/{ngo_id}/listings")
+def nearby_listings_alias(ngo_id: int):
     rows = query(
-        "SELECT * FROM nearby_listings_for_ngo(%s)",
+        "SELECT * FROM nearby_listings_for_receiver(%s)",
         (ngo_id,)
     )
     return [dict(r) for r in rows]
@@ -202,8 +264,8 @@ def nearby_listings(ngo_id: int):
 
 @app.post("/matches/run")
 def run_matcher():
-    """Trigger the expiry-aware greedy scheduler."""
-    rows = query("SELECT * FROM match_food_to_ngos()")
+    """Trigger the expiry-aware greedy scheduler with human prioritization & animal shelter rules."""
+    rows = query("SELECT * FROM match_food_to_receivers()")
     return {"matched": len(rows), "results": [dict(r) for r in rows]}
 
 
@@ -211,14 +273,14 @@ def run_matcher():
 def list_matches():
     rows = query(
         """
-        SELECT m.match_id, m.listing_id, m.ngo_id,
-               f.title, f.quantity_kg,
-               n.name AS ngo_name,
+        SELECT m.match_id, m.listing_id, m.receiver_id, m.receiver_id AS ngo_id,
+               f.title, f.quantity_kg, f.is_veg, f.suitable_for_animals, f.pickup_code, f.pickup_instructions,
+               r.name AS receiver_name, r.name AS ngo_name, r.receiver_type,
                m.priority_score, m.freshness_at_match, m.distance_km,
                m.status, m.matched_at, m.responded_at, m.picked_up_at, m.delivered_at
         FROM matches m
-        JOIN food_listings f ON f.listing_id = m.listing_id
-        JOIN ngos          n ON n.ngo_id      = m.ngo_id
+        JOIN food_listings f ON f.listing_id   = m.listing_id
+        JOIN receivers     r ON r.receiver_id  = m.receiver_id
         ORDER BY m.matched_at DESC
         """
     )

@@ -101,6 +101,11 @@ form.addEventListener('submit', async (e) => {
     return;
   }
 
+  const is_veg               = document.getElementById('isVegSelect').value === 'true';
+  const suitable_for_animals = document.getElementById('animalSelect').value === 'true';
+  const allergens            = document.getElementById('allergensInput').value.trim() || null;
+  const pickup_instructions  = document.getElementById('pickupInstInput').value.trim() || null;
+
   submitBtn.disabled = true;
   submitBtn.textContent = '⏳ Posting…';
 
@@ -110,9 +115,13 @@ form.addEventListener('submit', async (e) => {
       quantity_kg, servings,
       prepared_at: new Date(prepared_at).toISOString(),
       expires_at:  new Date(expires_at).toISOString(),
+      is_veg,
+      suitable_for_animals,
+      allergens,
+      pickup_instructions
     });
 
-    showToast(`✅ Listing #${result.listing_id} posted successfully!`);
+    showToast(`✅ Listing #${result.listing_id} posted (Pickup Code: ${result.pickup_code || 'Generated'})!`);
     form.reset();
     setDefaultTimes();
     freshnessPreview.style.display = 'none';
@@ -123,6 +132,7 @@ form.addEventListener('submit', async (e) => {
       quantity_kg,
       prepared_at,
       expires_at,
+      pickup_code: result.pickup_code
     });
     renderSessionListings();
   } catch (err) {
