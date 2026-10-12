@@ -16,22 +16,22 @@ DELETE FROM users;
 -- ---------------------------------------------------------------------
 -- 1. USERS (Roles: donor, receiver, admin)
 -- Password for all demo accounts: 'DemoPass123!'
--- (bcrypt hash stored: $2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u)
+-- Bcrypt hash generated with bcrypt 5.0.0, salt rounds 12
 -- ---------------------------------------------------------------------
 INSERT INTO users (email, password_hash, full_name, phone, role, is_active) VALUES
 -- Admin
-('admin@freshlink.org',    '$2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u', 'System Administrator',     '9999990001', 'admin',    TRUE),
+('admin@freshlink.org',    '$2b$12$DL4/nhNVkpzcp0sneYLte./4V9yCEZqCdYINlp4ED1vdqT/HarAn2', 'System Administrator',     '9999990001', 'admin',    TRUE),
 -- Donors
-('hostel.a@college.edu',   '$2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u', 'Boys Hostel A Mess Lead',   '9000000001', 'donor',    TRUE),
-('canteen@college.edu',    '$2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u', 'Central Canteen Manager',  '9000000002', 'donor',    TRUE),
-('sharma.home@gmail.com',  '$2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u', 'Ramesh Sharma',             '9000000003', 'donor',    TRUE),
-('hostel.d@college.edu',   '$2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u', 'Girls Hostel Mess Lead',    '9000000004', 'donor',    TRUE),
+('hostel.a@college.edu',   '$2b$12$DL4/nhNVkpzcp0sneYLte./4V9yCEZqCdYINlp4ED1vdqT/HarAn2', 'Boys Hostel A Mess Lead',   '9000000001', 'donor',    TRUE),
+('canteen@college.edu',    '$2b$12$DL4/nhNVkpzcp0sneYLte./4V9yCEZqCdYINlp4ED1vdqT/HarAn2', 'Central Canteen Manager',  '9000000002', 'donor',    TRUE),
+('sharma.home@gmail.com',  '$2b$12$DL4/nhNVkpzcp0sneYLte./4V9yCEZqCdYINlp4ED1vdqT/HarAn2', 'Ramesh Sharma',             '9000000003', 'donor',    TRUE),
+('hostel.d@college.edu',   '$2b$12$DL4/nhNVkpzcp0sneYLte./4V9yCEZqCdYINlp4ED1vdqT/HarAn2', 'Girls Hostel Mess Lead',    '9000000004', 'donor',    TRUE),
 -- Receivers
-('annapurna@trust.org',    '$2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u', 'Annapurna NGO Director',    '8000000001', 'receiver', TRUE),
-('shelter@hope.org',       '$2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u', 'Hope Shelter Coordinator',  '8000000002', 'receiver', TRUE),
-('jayanagar@kitchen.org',  '$2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u', 'Community Kitchen Lead',    '8000000003', 'receiver', TRUE),
-('paws@animalshelter.org', '$2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u', 'Paws Rescue Caretaker',    '8000000004', 'receiver', TRUE),
-('kumar.family@gmail.com', '$2b$12$e8r40Dq/Q1pQ3u581zU56.iF63b27bA/7z64b.d9A1G3P9m43vT2u', 'Suresh Kumar (Family)',    '8000000005', 'receiver', TRUE);
+('annapurna@trust.org',    '$2b$12$DL4/nhNVkpzcp0sneYLte./4V9yCEZqCdYINlp4ED1vdqT/HarAn2', 'Annapurna NGO Director',    '8000000001', 'receiver', TRUE),
+('shelter@hope.org',       '$2b$12$DL4/nhNVkpzcp0sneYLte./4V9yCEZqCdYINlp4ED1vdqT/HarAn2', 'Hope Shelter Coordinator',  '8000000002', 'receiver', TRUE),
+('jayanagar@kitchen.org',  '$2b$12$DL4/nhNVkpzcp0sneYLte./4V9yCEZqCdYINlp4ED1vdqT/HarAn2', 'Community Kitchen Lead',    '8000000003', 'receiver', TRUE),
+('paws@animalshelter.org', '$2b$12$DL4/nhNVkpzcp0sneYLte./4V9yCEZqCdYINlp4ED1vdqT/HarAn2', 'Paws Rescue Caretaker',    '8000000004', 'receiver', TRUE),
+('kumar.family@gmail.com', '$2b$12$DL4/nhNVkpzcp0sneYLte./4V9yCEZqCdYINlp4ED1vdqT/HarAn2', 'Suresh Kumar (Family)',    '8000000005', 'receiver', TRUE);
 
 -- ---------------------------------------------------------------------
 -- 2. DONORS (Linked to users)

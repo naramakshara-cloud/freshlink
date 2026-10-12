@@ -3,3 +3,5 @@ uvicorn[standard]
 psycopg2-binary
 python-multipart
 python-dotenv
+bcrypt
+pyjwt

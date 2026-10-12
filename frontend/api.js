@@ -7,6 +7,7 @@ const API = 'http://localhost:8000';
 async function apiFetch(path, options = {}) {
   try {
     const res = await fetch(`${API}${path}`, {
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       ...options,
     });
@@ -33,17 +34,17 @@ const getCategories = () => apiFetch('/categories');
 const getAvailableListings = () => apiFetch('/listings/available');
 const createListing = (data) => apiFetch('/listings', { method: 'POST', body: JSON.stringify(data) });
 
-// NGOs
-const getNGOs          = ()       => apiFetch('/ngos');
-const getNearbyListings= (ngoId)  => apiFetch(`/ngos/${ngoId}/listings`);
-const getNGOCapacity   = ()       => apiFetch('/ngos/capacity');
+// NGOs / Receivers
+const getNGOs          = ()       => apiFetch('/receivers');
+const getNearbyListings= (ngoId)  => apiFetch(`/receivers/${ngoId}/listings`);
+const getNGOCapacity   = ()       => apiFetch('/receivers/capacity');
 
 // Matches
 const runMatcher    = ()          => apiFetch('/matches/run', { method: 'POST' });
 const getMatches    = ()          => apiFetch('/matches');
-const updateMatch   = (id, action)=> apiFetch(`/matches/${id}`, {
+const updateMatch   = (id, action, pickupCode = null)=> apiFetch(`/matches/${id}`, {
   method: 'PATCH',
-  body: JSON.stringify({ action }),
+  body: JSON.stringify({ action, pickup_code: pickupCode }),
 });
 
 // Impact

@@ -237,6 +237,18 @@ async function handleAction(btn) {
   btn.disabled  = true;
   btn.textContent = '⏳…';
 
+  let pickupCode = null;
+  if (action === 'picked_up') {
+    pickupCode = prompt('🔑 Enter the 4-digit Pickup Code provided by the donor:');
+    if (!pickupCode || !pickupCode.trim()) {
+      btn.disabled = false;
+      btn.textContent = '🚚 Mark Picked Up';
+      showToast('Pickup code is required to confirm collection.', 'error');
+      return;
+    }
+    pickupCode = pickupCode.trim();
+  }
+
   const toastMsg = {
     accepted:  '✅ Match accepted!',
     rejected:  '❌ Rejected — food returned to the pool',
@@ -245,7 +257,7 @@ async function handleAction(btn) {
   };
 
   try {
-    await updateMatch(matchId, action);
+    await updateMatch(matchId, action, pickupCode);
     showToast(toastMsg[action] ?? 'Updated');
     await loadAll();          // full refresh keeps everything in sync
   } catch (e) {
