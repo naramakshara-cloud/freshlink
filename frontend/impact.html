@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FreshLink – Impact</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <span class="logo">🌿 FreshLink</span>
+    <div class="nav-links">
+      <a href="donor.html">Post Food</a>
+      <a href="ngo.html">NGO Dashboard</a>
+      <a href="impact.html" class="active">Impact</a>
+    </div>
+  </nav>
+
+  <header class="page-hero impact-hero">
+    <div class="hero-content">
+      <h1>Our Impact</h1>
+      <p>Every kilogram counts. Here's what FreshLink has saved so far.</p>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- ── Big KPI numbers ───────────────────────────── -->
+    <div class="kpi-grid" id="kpiGrid">
+      <div class="kpi-card">
+        <div class="kpi-icon">🍱</div>
+        <div class="kpi-value" id="kpiDeliveries">–</div>
+        <div class="kpi-label">Deliveries Completed</div>
+      </div>
+      <div class="kpi-card highlight">
+        <div class="kpi-icon">⚖️</div>
+        <div class="kpi-value" id="kpiKg">–</div>
+        <div class="kpi-label">Kg of Food Saved</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon">♻️</div>
+        <div class="kpi-value" id="kpiRescueRate">–</div>
+        <div class="kpi-label">Overall Rescue Rate</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon">⚠️</div>
+        <div class="kpi-value" id="kpiExpired">–</div>
+        <div class="kpi-label">Listings Expired</div>
+      </div>
+    </div>
+
+    <!-- ── CO₂ & meals equivalent ─────────────────── -->
+    <div class="equivalents-bar card">
+      <div class="equiv-item">
+        <span class="equiv-icon">🌳</span>
+        <div>
+          <div class="equiv-value" id="equivCO2">–</div>
+          <div class="equiv-label">kg CO₂ avoided <span class="footnote">(2.5 kg CO₂ per kg food waste)</span></div>
+        </div>
+      </div>
+      <div class="equiv-item">
+        <span class="equiv-icon">🍽️</span>
+        <div>
+          <div class="equiv-value" id="equivMeals">–</div>
+          <div class="equiv-label">meals provided <span class="footnote">(0.4 kg per meal)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Rescue rate bar chart (CSS-only) ──────── -->
+    <section class="card">
+      <h2 class="card-title">📊 Rescue Rate by Donor Type</h2>
+      <div id="chartContainer" class="bar-chart"></div>
+    </section>
+
+    <!-- ── Breakdown table ───────────────────────── -->
+    <section class="card">
+      <h2 class="card-title">📋 Breakdown by Donor Type</h2>
+      <div class="table-wrap">
+        <table id="impactTable" class="data-table">
+          <thead>
+            <tr>
+              <th>Donor Type</th>
+              <th>Deliveries</th>
+              <th>Kg Saved</th>
+              <th>Expired</th>
+              <th>Rescue Rate</th>
+            </tr>
+          </thead>
+          <tbody id="impactBody">
+            <tr><td colspan="5" class="loading-row">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── Admin actions ─────────────────────────── -->
+    <div class="housekeeping-row">
+      <button class="btn btn-secondary" id="hkBtn">🧹 Expire Stale Listings</button>
+      <button class="btn btn-danger"    id="resetBtn">🔄 Reset Demo Data</button>
+      <span id="hkResult" class="hk-result"></span>
+    </div>
+
+  </main>
+
+  <script src="api.js"></script>
+  <script src="impact.js"></script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FreshLink – Donor</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ── Nav ───────────────────────────────────────────── -->
+  <nav class="navbar">
+    <span class="logo">🌿 FreshLink</span>
+    <div class="nav-links">
+      <a href="donor.html" class="active">Post Food</a>
+      <a href="ngo.html">NGO Dashboard</a>
+      <a href="impact.html">Impact</a>
+    </div>
+  </nav>
+
+  <!-- ── Hero ──────────────────────────────────────────── -->
+  <header class="page-hero donor-hero">
+    <div class="hero-content">
+      <h1>Post Surplus Food</h1>
+      <p>Turn today's extra food into tomorrow's meal for someone in need.</p>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- ── Form card ─────────────────────────────────── -->
+    <section class="card form-card">
+      <h2 class="card-title">📦 New Food Listing</h2>
+
+      <form id="donorForm" novalidate>
+
+        <div class="form-grid">
+          <!-- Donor -->
+          <div class="form-group">
+            <label for="donorSelect">Donor / Mess</label>
+            <select id="donorSelect" required>
+              <option value="">Loading donors…</option>
+            </select>
+          </div>
+
+          <!-- Category -->
+          <div class="form-group">
+            <label for="categorySelect">Food Category</label>
+            <select id="categorySelect" required>
+              <option value="">Loading categories…</option>
+            </select>
+          </div>
+
+          <!-- Title -->
+          <div class="form-group full-width">
+            <label for="titleInput">Food Title</label>
+            <input type="text" id="titleInput" placeholder="e.g. Veg Pulao and Dal" required />
+          </div>
+
+          <!-- Description -->
+          <div class="form-group full-width">
+            <label for="descInput">Description <span class="optional">(optional)</span></label>
+            <textarea id="descInput" rows="2" placeholder="Any details about packaging, allergies, etc."></textarea>
+          </div>
+
+          <!-- Quantity -->
+          <div class="form-group">
+            <label for="quantityInput">Quantity (kg)</label>
+            <input type="number" id="quantityInput" min="0.1" step="0.1" placeholder="e.g. 5.5" required />
+          </div>
+
+          <!-- Servings -->
+          <div class="form-group">
+            <label for="servingsInput">Servings <span class="optional">(optional)</span></label>
+            <input type="number" id="servingsInput" min="1" placeholder="e.g. 20" />
+          </div>
+
+          <!-- Prepared at -->
+          <div class="form-group">
+            <label for="preparedAt">Prepared At</label>
+            <input type="datetime-local" id="preparedAt" required />
+          </div>
+
+          <!-- Expires at -->
+          <div class="form-group">
+            <label for="expiresAt">Donor Expiry Time</label>
+            <input type="datetime-local" id="expiresAt" required />
+          </div>
+        </div>
+
+        <!-- Freshness preview -->
+        <div class="freshness-preview" id="freshnessPreview" style="display:none">
+          <span class="preview-label">Estimated freshness right now:</span>
+          <span class="badge" id="previewBadge">–</span>
+          <span id="previewScore"></span>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+          🚀 Post Listing
+        </button>
+      </form>
+    </section>
+
+    <!-- ── Recent listings by this session ───────────── -->
+    <section class="card" id="myListingsCard" style="display:none">
+      <h2 class="card-title">📋 My Recent Listings</h2>
+      <div id="myListings" class="listing-grid"></div>
+    </section>
+
+  </main>
+
+  <script src="api.js"></script>
+  <script src="donor.js"></script>
+</body>
+</html>
