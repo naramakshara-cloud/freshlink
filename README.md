@@ -56,6 +56,17 @@ $$\text{Priority} = 0.5 \cdot S_{\text{urgency}} + 0.3 \cdot S_{\text{freshness}
 
 ---
 
+### 4. Secure Authentication & Role-Based Access Control (RBAC)
+- **Password Security**: Passwords are never stored in plaintext. They are salted and hashed using **bcrypt** (cost factor: 12).
+- **Session Tokens**: Handled via signed **JWT tokens** delivered in an **HttpOnly cookie** (`access_token`) with `SameSite=Lax` protection against cross-site request forgery (CSRF) and XSS token harvesting.
+- **Strict Endpoint Permissions**:
+  - **Donors**: Can only create listings under their own verified donor profile and review their own active surplus posts.
+  - **Receivers**: Can only view surplus listings located within their service radius and accept/reject their assigned matches.
+  - **Admins**: Exclusively authorized to inspect the full user list (`/users`), approve/reject receiver applications, manually trigger auto-matching runs, execute database resets, and trigger housekeeping cleanup.
+  - **Confidential Verification Codes**: The 4-digit `pickup_code` is returned only to the donor who created the listing and is strictly hidden from receivers. To prevent unauthorized pickups, the receiver must obtain the code in person and submit it during the pickup confirmation step.
+
+---
+
 ## 🛠 Tech Stack
 
 - **Database**: PostgreSQL 14+ with **PostGIS 3+** extension
@@ -65,9 +76,10 @@ $$\text{Priority} = 0.5 \cdot S_{\text{urgency}} + 0.3 \cdot S_{\text{freshness}
 - **Backend**: **FastAPI** (Python 3.10+) with **Uvicorn**
   - Database connectivity with `psycopg2-binary`.
   - Secure credential isolation via `python-dotenv`.
+  - Authentication via `bcrypt` and `pyjwt` (HS256).
 - **Frontend**: Clean, responsive **HTML5**, **CSS3**, and vanilla **JavaScript (ES6+)**
   - Donor submission portal with dietary, allergen, and animal suitability controls.
-  - Receiver dashboard with 🟢🟡🔴 freshness bands, live countdowns, pickup code displays, and match lifecycle buttons (`Accept`, `Reject`, `Mark Picked Up`, `Mark Delivered`).
+  - Receiver dashboard with 🟢🟡🔴 freshness bands, live countdowns, pickup code verification prompt on pickup handoff, and match lifecycle buttons (`Accept`, `Reject`, `Mark Picked Up`, `Mark Delivered`).
   - Impact dashboard with real-time KPI metrics and demo reset controls.
 
 ---
@@ -76,11 +88,13 @@ $$\text{Priority} = 0.5 \cdot S_{\text{urgency}} + 0.3 \cdot S_{\text{freshness}
 
 ```
 freshlink/
-├── .env.example                     <- Template for database credentials
+├── .env.example                     <- Template for database credentials & JWT secret
 ├── .gitignore                       <- Ignores .env and __pycache__
 ├── README.md                        <- Project overview and guide
 ├── backend/
-│   ├── main.py                      <- FastAPI API server
+│   ├── main.py                      <- FastAPI API server with auth & RBAC
+│   ├── create_admin.py              <- CLI utility to create admin accounts
+│   ├── test_auth_security.py        <- Automated security & permission test suite
 │   └── requirements.txt             <- Python dependencies
 ├── database/
 │   ├── schema.sql                   <- Safe multi-user schema (no drop statements)
@@ -89,7 +103,7 @@ freshlink/
 │   └── migrations/
 │       └── 001_initial_schema.sql   <- Versioned initial migration script
 └── frontend/
-    ├── api.js                       <- Shared API fetch client
+    ├── api.js                       <- Shared API fetch client (credentials: include)
     ├── donor.html / donor.js        <- Donor listing portal
     ├── ngo.html / ngo.js            <- Receiver / Shelter dashboard
     ├── impact.html / impact.js      <- Metrics & impact analytics
@@ -122,13 +136,14 @@ Copy-Item .env.example .env
 cp .env.example .env
 ```
 
-Edit `.env` with your PostgreSQL superuser password:
+Edit `.env` with your PostgreSQL superuser password and a secret JWT key:
 ```env
 DB_NAME=freshlink
 DB_USER=postgres
 DB_PASSWORD=your_actual_password_here
 DB_HOST=localhost
 DB_PORT=5432
+JWT_SECRET=your_secure_jwt_secret_key_here
 ```
 
 ### Step 3: Initialize Database
@@ -173,22 +188,48 @@ python -m uvicorn main:app --reload --port 8000
 - Interactive Swagger Documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
 - Interactive ReDoc: [http://localhost:8000/redoc](http://localhost:8000/redoc)
 
-### 2. Demo User Accounts (from `demo_seed.sql`)
-*Default password for all demo accounts: `DemoPass123!`*
+### 2. Creating an Administrator Account (CLI)
+You can create a new administrator account or elevate an existing user at any time using the bundled CLI tool:
+
+```bash
+# Interactive mode
+python backend/create_admin.py
+
+# Or pass arguments directly
+python backend/create_admin.py --email admin@example.com --password "MySecretPass123!" --name "Alice Admin" --phone "9876543210"
+```
+
+### 3. Demo User Accounts (from `demo_seed.sql`)
+All demo accounts are pre-configured with real bcrypt password hashes.
+**Default Password for all demo accounts**: `DemoPass123!`
 
 | Role | Email | Name / Organisation | Description |
 |---|---|---|---|
-| **Admin** | `admin@freshlink.org` | System Administrator | System-wide admin access |
-| **Donor** | `hostel.a@college.edu` | Boys Hostel Block A Mess | Hostel mess donor |
-| **Donor** | `canteen@college.edu` | Central Canteen | Campus canteen donor |
-| **Donor** | `sharma.home@gmail.com` | Sharma Household | Home surplus donor |
+| **Admin** | `admin@freshlink.org` | System Administrator | System-wide admin access, user audits, approvals |
+| **Donor** | `hostel.a@college.edu` | Boys Hostel Block A Mess | Hostel mess food donor |
+| **Donor** | `canteen@college.edu` | Central Canteen | Campus canteen food donor |
+| **Donor** | `sharma.home@gmail.com` | Sharma Household | Home surplus food donor |
+| **Donor** | `hostel.d@college.edu` | Girls Hostel Mess | Campus hostel mess food donor |
 | **Receiver** | `annapurna@trust.org` | Annapurna Food Bank | Large NGO (80 kg cap, refrigerated) |
 | **Receiver** | `shelter@hope.org` | Hope Shelter | Orphanage (30 kg cap) |
 | **Receiver** | `jayanagar@kitchen.org` | Community Kitchen | Community kitchen (40 kg cap) |
 | **Receiver** | `paws@animalshelter.org` | Paws Animal Rescue | Animal shelter (animal-safe food only) |
-| **Receiver** | `kumar.family@gmail.com` | Kumar Family | Individual/Family (5 kg capacity) |
+| **Receiver** | `kumar.family@gmail.com` | Kumar Family | Individual/Family (5 kg default capacity) |
 
-### 3. Open the Web Frontend
+### 4. Running the Security Test Suite
+You can test the entire authentication and permission model at any time:
+```bash
+python backend/test_auth_security.py
+```
+This script validates:
+- Rejection (401) of unauthenticated requests on protected endpoints.
+- Exclusion of `password_hash` from `/users` results.
+- Role-based barriers (403) for donors and receivers trying to access restricted admin actions.
+- Privacy of `pickup_code` (visible only to the food creator; hidden from receivers).
+- Rejection of incorrect pickup codes during receiver collection handoffs.
+- Successful cookie-based logout.
+
+### 5. Open the Web Frontend
 Open the static web pages in your browser:
 - **Donor Portal**: Open `frontend/donor.html`
 - **Receiver Dashboard**: Open `frontend/ngo.html`
