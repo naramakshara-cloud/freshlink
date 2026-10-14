@@ -1,4 +1,4 @@
-# FreshLink 🌿
+FreshLink 
 
 **FreshLink** is a hyperlocal surplus food redistribution system connecting donors (college hostels, canteens, households, restaurants) with verified receivers (NGOs, community kitchens, animal shelters, and individuals/families in need) in real time.
 
