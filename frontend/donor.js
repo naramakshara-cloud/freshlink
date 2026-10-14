@@ -12,6 +12,7 @@ const freshnessPreview = document.getElementById('freshnessPreview');
 const previewBadge     = document.getElementById('previewBadge');
 const previewScore     = document.getElementById('previewScore');
 const myListings       = document.getElementById('myListings');
+const categoryHint     = document.getElementById('categoryHint');
 let categoryData = [];
 let myListingData = [];
 let me = null;
@@ -36,16 +37,35 @@ function updateFreshnessPreview() {
   const catId = parseInt(categorySel.value);
   const cat   = categoryData.find(c => c.category_id === catId);
   const prep  = prepInput.value;
-  if (!cat || !prep) { freshnessPreview.style.display = 'none'; return; }
-  const score = clientFreshness(new Date(prep), parseFloat(cat.decay_rate ?? 0.1));
+  const exp   = expInput.value;
+  if (!cat || !prep || !exp) { freshnessPreview.style.display = 'none'; return; }
+  const prepared = new Date(prep);
+  const safeLimit = new Date(prepared.getTime() + parseFloat(cat.max_safe_hours) * 36e5);
+  const effective = new Date(Math.min(new Date(exp).getTime(), safeLimit.getTime()));
+  const score = clientFreshness(prepared, effective, parseFloat(cat.spoilage_shape ?? 1));
   const band  = bandFromScore(score);
   freshnessPreview.style.display = 'flex';
   previewBadge.className = `badge badge-${band}`;
   previewBadge.textContent = band;
-  previewScore.textContent = `${score}/100`;
+  previewScore.textContent = effective < new Date(exp)
+    ? `${score}/100 · safe until ${formatDatetime(effective)} (food-safety limit for this category)`
+    : `${score}/100`;
 }
+function updateCategoryHint() {
+  const cat = categoryData.find(c => c.category_id === parseInt(categorySel.value));
+  if (!cat) { categoryHint.textContent = ''; return; }
+  const hours = parseFloat(cat.max_safe_hours);
+  const safe = hours >= 48 && hours % 24 === 0 ? `${hours / 24} days` : `${hours} hours`;
+  const parts = [];
+  if (cat.description) parts.push(`Includes: ${cat.description}.`);
+  parts.push(`Safe for up to ${safe} after it's made.`);
+  if (cat.requires_refrigeration) parts.push('Needs a fridge, so it only goes to receivers who have one.');
+  categoryHint.textContent = parts.join(' ');
+}
+categorySel.addEventListener('change', updateCategoryHint);
 categorySel.addEventListener('change', updateFreshnessPreview);
 prepInput.addEventListener('input', updateFreshnessPreview);
+expInput.addEventListener('input', updateFreshnessPreview);
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const category_id = parseInt(categorySel.value);
@@ -77,6 +97,7 @@ form.addEventListener('submit', async (e) => {
     });
     showToast(result.matched_to ? `✅ Posted and matched to ${result.matched_to}` : '✅ Posted. Waiting for a nearby receiver.');
     form.reset();
+    categoryHint.textContent = '';
     setDefaultTimes();
     freshnessPreview.style.display = 'none';
     await loadMyListings();

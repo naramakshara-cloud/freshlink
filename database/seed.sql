@@ -1,17 +1,7 @@
--- =====================================================================
--- FRESHLINK Seed Data: Canonical Reference Data
--- This file contains ONLY permanent system reference data (food categories).
--- For demo users, mock donors/receivers, and sample listings, see demo_seed.sql.
--- =====================================================================
-
-INSERT INTO food_categories (name, decay_rate, max_safe_hours, requires_refrigeration, description) VALUES
-('Cooked Rice & Curries', 0.1500,  6, FALSE, 'Hot cooked meals; spoil quickly at room temperature'),
-('Breads & Rotis',        0.0800, 12, FALSE, 'Chapati, roti, bread, buns'),
-('Dairy & Sweets',        0.1200,  8, TRUE,  'Milk, curd, paneer, milk-based sweets'),
-('Fresh Fruits & Veg',    0.0300, 48, FALSE, 'Uncut produce'),
-('Packaged / Dry Food',   0.0050, 168, FALSE, 'Sealed snacks, biscuits, dry rations')
-ON CONFLICT (name) DO UPDATE SET
-    decay_rate = EXCLUDED.decay_rate,
-    max_safe_hours = EXCLUDED.max_safe_hours,
-    requires_refrigeration = EXCLUDED.requires_refrigeration,
-    description = EXCLUDED.description;
+INSERT INTO food_categories (name, decay_rate, max_safe_hours, spoilage_shape, requires_refrigeration, description) VALUES
+('Cooked Rice & Curries', 0.1500,   6, 1.0, FALSE, 'Biryani, pulao, plain rice, dal, sambar, rasam, curries, sabzi'),
+('Breads & Rotis',        0.0800,  12, 1.0, FALSE, 'Chapati, roti, naan, paratha, puri, bread, buns, pav'),
+('Dairy & Sweets',        0.1200,   8, 1.0, TRUE,  'Milk, curd, buttermilk, paneer dishes, kheer, rasgulla, milk-based sweets'),
+('Fresh Fruits & Veg',    0.0300,  48, 1.0, FALSE, 'Whole, uncut fruits and vegetables such as bananas, apples, oranges and tomatoes'),
+('Packaged / Dry Food',   0.0050, 168, 1.0, FALSE, 'Sealed biscuits, chips, bread packets, and dry rations such as rice, atta and dal')
+ON CONFLICT (name) DO NOTHING;

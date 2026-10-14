@@ -641,3 +641,12 @@ button.auth-tab {
   .nav-user { border-left: none; padding-left: 0; }
 }
 .map-error { padding: 1rem; font-size: .85rem; color: var(--gray-600); }
+.field-hint { display: block; font-size: .8rem; color: var(--gray-600); line-height: 1.45; margin-top: .35rem; min-height: 1em; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: .75rem; }
+.section-head .card-title { margin-bottom: 0; }
+.category-form { background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.25rem; }
+.category-form-title { font-size: 1rem; margin-bottom: .75rem; }
+.category-form-actions { display: flex; gap: .5rem; margin-top: 1rem; }
+.row-muted td { color: var(--gray-400); }
+.cell-wrap { max-width: 320px; white-space: normal; line-height: 1.4; }
+[hidden] { display: none !important; }

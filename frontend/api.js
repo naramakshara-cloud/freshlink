@@ -30,6 +30,9 @@ const updateMatch   = (id, action, pickupCode = null)=> apiFetch(`/matches/${id}
 });
 const getImpact     = ()          => apiFetch('/impact');
 const expireStale   = ()          => apiFetch('/housekeeping/expire', { method: 'POST' });
+const getAdminCategories = () => apiFetch('/admin/categories');
+const createCategory = (data) => apiFetch('/admin/categories', { method: 'POST', body: JSON.stringify(data) });
+const updateCategory = (id, data) => apiFetch(`/admin/categories/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 function escapeHTML(value) {
   return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -58,10 +61,12 @@ function countdown(isoExpiry) {
   if (h > 0)   return `${h}h ${m}m left`;
   return `${m}m ${s}s left`;
 }
-function clientFreshness(preparedAt, decayRate) {
-  const hours = (Date.now() - new Date(preparedAt)) / 36e5;
-  const score = Math.max(0, Math.min(100, 100 * Math.exp(-decayRate * Math.max(0, hours))));
-  return Math.round(score * 100) / 100;
+function clientFreshness(preparedAt, effectiveExpiry, shape) {
+  const life = new Date(effectiveExpiry) - new Date(preparedAt);
+  if (life <= 0) return 0;
+  const used = Math.min(1, Math.max(0, (Date.now() - new Date(preparedAt)) / life));
+  const score = 100 * (1 - Math.pow(used, shape));
+  return Math.round(Math.max(0, Math.min(100, score)) * 100) / 100;
 }
 function bandFromScore(score) {
   if (score >= 70) return 'GREEN';

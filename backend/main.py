@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import psycopg2
 import psycopg2.extras
+import psycopg2.errors
 import subprocess
 import os
 import datetime
@@ -167,6 +168,24 @@ class ListingCreate(BaseModel):
 class MatchAction(BaseModel):
     action:      str
     pickup_code: Optional[str] = None
+class CategoryCreate(BaseModel):
+    name:                   str
+    description:            Optional[str] = None
+    max_safe_hours:         float
+    requires_refrigeration: bool = False
+class CategoryUpdate(BaseModel):
+    name:                   Optional[str] = None
+    description:            Optional[str] = None
+    max_safe_hours:         Optional[float] = None
+    requires_refrigeration: Optional[bool] = None
+    is_active:              Optional[bool] = None
+def check_category_fields(name, hours):
+    if name is not None and not name.strip():
+        raise HTTPException(status_code=400, detail="Give the food type a name.")
+    if name is not None and len(name.strip()) > 60:
+        raise HTTPException(status_code=400, detail="Keep the name under 60 characters.")
+    if hours is not None and not (0.5 <= hours <= 720):
+        raise HTTPException(status_code=400, detail="Safe time must be between 0.5 and 720 hours.")
 class ReceiverApproval(BaseModel):
     verification_status: str
 @app.post("/auth/signup", status_code=status.HTTP_201_CREATED)
@@ -338,6 +357,9 @@ def create_listing(body: ListingCreate, current_user: dict = Depends(require_rol
     if not donor and current_user["role"] != "admin":
         raise HTTPException(status_code=400, detail="You do not have an active donor profile configured.")
     donor_id = donor["donor_id"] if donor else query("SELECT donor_id FROM donors LIMIT 1", fetch="one")["donor_id"]
+    category = query("SELECT is_active FROM food_categories WHERE category_id = %s", (body.category_id,), fetch="one")
+    if not category or not category["is_active"]:
+        raise HTTPException(status_code=400, detail="This food type is no longer available. Pick another one.")
     try:
         row = query(
             """
@@ -578,9 +600,60 @@ def update_match(match_id: int, body: MatchAction, current_user: dict = Depends(
 @app.get("/categories")
 def list_categories():
     rows = query(
-        "SELECT category_id, name, requires_refrigeration, decay_rate, max_safe_hours FROM food_categories ORDER BY name"
+        "SELECT category_id, name, description, requires_refrigeration, max_safe_hours, spoilage_shape FROM food_categories WHERE is_active ORDER BY name"
     )
     return [dict(r) for r in rows]
+@app.get("/admin/categories")
+def admin_list_categories(current_user: dict = Depends(require_role(["admin"]))):
+    rows = query(
+        """
+        SELECT c.category_id, c.name, c.description, c.max_safe_hours, c.requires_refrigeration,
+               c.is_active, COUNT(l.listing_id) AS listing_count
+        FROM food_categories c
+        LEFT JOIN food_listings l ON l.category_id = c.category_id
+        GROUP BY c.category_id
+        ORDER BY c.is_active DESC, c.name
+        """
+    )
+    return [dict(r) for r in rows]
+@app.post("/admin/categories", status_code=status.HTTP_201_CREATED)
+def admin_create_category(body: CategoryCreate, current_user: dict = Depends(require_role(["admin"]))):
+    check_category_fields(body.name, body.max_safe_hours)
+    try:
+        row = query(
+            """
+            INSERT INTO food_categories (name, description, max_safe_hours, requires_refrigeration)
+            VALUES (%s, %s, %s, %s)
+            RETURNING category_id
+            """,
+            (body.name.strip(), (body.description or "").strip() or None, body.max_safe_hours, body.requires_refrigeration),
+            fetch="one",
+        )
+    except psycopg2.errors.UniqueViolation:
+        raise HTTPException(status_code=400, detail="A food type with this name already exists.")
+    return {"category_id": row["category_id"], "message": "Food type added"}
+@app.patch("/admin/categories/{category_id}")
+def admin_update_category(category_id: int, body: CategoryUpdate, current_user: dict = Depends(require_role(["admin"]))):
+    check_category_fields(body.name, body.max_safe_hours)
+    fields = (body.model_dump if hasattr(body, 'model_dump') else body.dict)(exclude_none=True)
+    if "name" in fields:
+        fields["name"] = fields["name"].strip()
+    if "description" in fields:
+        fields["description"] = fields["description"].strip() or None
+    if not fields:
+        raise HTTPException(status_code=400, detail="Nothing to change.")
+    sets = ", ".join(f"{k} = %s" for k in fields)
+    try:
+        row = query(
+            f"UPDATE food_categories SET {sets} WHERE category_id = %s RETURNING category_id",
+            (*fields.values(), category_id),
+            fetch="one",
+        )
+    except psycopg2.errors.UniqueViolation:
+        raise HTTPException(status_code=400, detail="A food type with this name already exists.")
+    if not row:
+        raise HTTPException(status_code=404, detail="Food type not found.")
+    return {"category_id": category_id, "message": "Food type updated"}
 @app.get("/listings/available")
 def available_listings():
     rows = query(

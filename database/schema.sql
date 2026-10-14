@@ -1,17 +1,4 @@
--- =====================================================================
--- FRESHLINK: Hyperlocal Food Surplus Redistribution Database System
--- Schema Definition (Multi-User, Receiver Hierarchy, Safety Guards)
--- Target: PostgreSQL 14+ with PostGIS 3+
---
--- NOTE: This file does NOT contain DROP TABLE statements so existing
--- data is never deleted. For upgrades, see the migrations/ directory.
--- =====================================================================
-
 CREATE EXTENSION IF NOT EXISTS postgis;
-
--- ---------------------------------------------------------------------
--- 1. ENUM TYPES
--- ---------------------------------------------------------------------
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
         CREATE TYPE user_role AS ENUM ('donor', 'receiver', 'admin');
@@ -20,14 +7,7 @@ DO $$ BEGIN
         CREATE TYPE donor_type AS ENUM ('hostel', 'canteen', 'household', 'restaurant', 'event', 'other');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'receiver_type') THEN
-        CREATE TYPE receiver_type AS ENUM (
-            'individual_or_family',
-            'ngo',
-            'animal_shelter',
-            'orphanage',
-            'old_age_home',
-            'community_kitchen'
-        );
+        CREATE TYPE receiver_type AS ENUM ('individual_or_family', 'ngo', 'animal_shelter', 'orphanage', 'old_age_home', 'community_kitchen');
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'verification_status') THEN
         CREATE TYPE verification_status AS ENUM ('pending', 'approved', 'rejected');
@@ -38,11 +18,10 @@ DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'match_status') THEN
         CREATE TYPE match_status AS ENUM ('pending', 'accepted', 'rejected', 'picked_up', 'completed', 'cancelled');
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'pickup_status') THEN
+        CREATE TYPE pickup_status AS ENUM ('proposed', 'confirmed', 'completed', 'missed', 'cancelled');
+    END IF;
 END $$;
-
--- ---------------------------------------------------------------------
--- 2. USERS
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
     user_id       SERIAL PRIMARY KEY,
     email         VARCHAR(120) NOT NULL UNIQUE,
@@ -53,22 +32,31 @@ CREATE TABLE IF NOT EXISTS users (
     is_active     BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
-
--- ---------------------------------------------------------------------
--- 3. FOOD CATEGORIES
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS food_categories (
     category_id            SERIAL PRIMARY KEY,
     name                   VARCHAR(60)  NOT NULL UNIQUE,
-    decay_rate             NUMERIC(6,4) NOT NULL CHECK (decay_rate > 0),
+    decay_rate             NUMERIC(6,4) NOT NULL DEFAULT 0.1000 CHECK (decay_rate > 0),
     max_safe_hours         NUMERIC(6,2) NOT NULL CHECK (max_safe_hours > 0),
+    spoilage_shape         NUMERIC(3,1) NOT NULL DEFAULT 1.0 CHECK (spoilage_shape >= 1),
     requires_refrigeration BOOLEAN      NOT NULL DEFAULT FALSE,
-    description            TEXT
+    description            TEXT,
+    is_active              BOOLEAN      NOT NULL DEFAULT TRUE
 );
-
--- ---------------------------------------------------------------------
--- 4. DONORS (linked to users)
--- ---------------------------------------------------------------------
+ALTER TABLE food_categories ADD COLUMN IF NOT EXISTS spoilage_shape NUMERIC(3,1) NOT NULL DEFAULT 1.0 CHECK (spoilage_shape >= 1);
+ALTER TABLE food_categories ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE food_categories ALTER COLUMN decay_rate SET DEFAULT 0.1000;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT LOWER(name) FROM food_categories GROUP BY LOWER(name) HAVING COUNT(*) > 1) THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_category_name_ci ON food_categories (LOWER(name));
+    ELSE
+        RAISE NOTICE 'Some food type names differ only in capital letters. Rename them, then run schema.sql again.';
+    END IF;
+END $$;
+UPDATE food_categories SET description = 'Biryani, pulao, plain rice, dal, sambar, rasam, curries, sabzi' WHERE description = 'Hot cooked meals; spoil quickly at room temperature';
+UPDATE food_categories SET description = 'Chapati, roti, naan, paratha, puri, bread, buns, pav' WHERE description = 'Chapati, roti, bread, buns';
+UPDATE food_categories SET description = 'Milk, curd, buttermilk, paneer dishes, kheer, rasgulla, milk-based sweets' WHERE description = 'Milk, curd, paneer, milk-based sweets';
+UPDATE food_categories SET description = 'Whole, uncut fruits and vegetables such as bananas, apples, oranges and tomatoes' WHERE description = 'Uncut produce';
+UPDATE food_categories SET description = 'Sealed biscuits, chips, bread packets, and dry rations such as rice, atta and dal' WHERE description = 'Sealed snacks, biscuits, dry rations';
 CREATE TABLE IF NOT EXISTS donors (
     donor_id      SERIAL PRIMARY KEY,
     user_id       INT          REFERENCES users(user_id) ON DELETE SET NULL,
@@ -81,10 +69,6 @@ CREATE TABLE IF NOT EXISTS donors (
     is_verified   BOOLEAN      NOT NULL DEFAULT FALSE,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
-
--- ---------------------------------------------------------------------
--- 5. RECEIVERS (formerly ngos; individuals/families, shelters, NGOs)
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS receivers (
     receiver_id         SERIAL PRIMARY KEY,
     user_id             INT                 REFERENCES users(user_id) ON DELETE SET NULL,
@@ -101,8 +85,6 @@ CREATE TABLE IF NOT EXISTS receivers (
     is_active           BOOLEAN             NOT NULL DEFAULT TRUE,
     created_at          TIMESTAMPTZ         NOT NULL DEFAULT NOW()
 );
-
--- Ensure individuals/families get 5kg default and orgs get 50kg default if omitted
 CREATE OR REPLACE FUNCTION trg_receiver_default_capacity() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -116,15 +98,19 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS receiver_default_capacity ON receivers;
 CREATE TRIGGER receiver_default_capacity
 BEFORE INSERT ON receivers
 FOR EACH ROW EXECUTE FUNCTION trg_receiver_default_capacity();
-
--- ---------------------------------------------------------------------
--- 6. FOOD LISTINGS (surplus posts)
--- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS receiver_requirements (
+    requirement_id     SERIAL PRIMARY KEY,
+    receiver_id        INT          NOT NULL REFERENCES receivers(receiver_id) ON DELETE CASCADE,
+    category_id        INT          NOT NULL REFERENCES food_categories(category_id),
+    quantity_needed_kg NUMERIC(8,2) NOT NULL CHECK (quantity_needed_kg > 0),
+    is_active          BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_receiver_category UNIQUE (receiver_id, category_id)
+);
 CREATE TABLE IF NOT EXISTS food_listings (
     listing_id             SERIAL PRIMARY KEY,
     donor_id               INT          NOT NULL REFERENCES donors(donor_id) ON DELETE CASCADE,
@@ -150,10 +136,6 @@ CREATE TABLE IF NOT EXISTS food_listings (
     CONSTRAINT chk_expiry_after_prep CHECK (expires_at > prepared_at),
     CONSTRAINT chk_prep_not_future   CHECK (prepared_at <= created_at + INTERVAL '5 minutes')
 );
-
--- ---------------------------------------------------------------------
--- 7. MATCHES (listing -> receiver assignments)
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS matches (
     match_id           SERIAL PRIMARY KEY,
     listing_id         INT          NOT NULL REFERENCES food_listings(listing_id) ON DELETE CASCADE,
@@ -167,15 +149,9 @@ CREATE TABLE IF NOT EXISTS matches (
     picked_up_at       TIMESTAMPTZ,
     delivered_at       TIMESTAMPTZ
 );
-
--- One active match per listing at a time
 CREATE UNIQUE INDEX IF NOT EXISTS uq_one_active_match_per_listing
     ON matches(listing_id)
     WHERE status IN ('pending', 'accepted', 'picked_up');
-
--- ---------------------------------------------------------------------
--- 8. MATCH HISTORY (audit log)
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS match_history (
     history_id  SERIAL PRIMARY KEY,
     match_id    INT          NOT NULL REFERENCES matches(match_id) ON DELETE CASCADE,
@@ -183,43 +159,65 @@ CREATE TABLE IF NOT EXISTS match_history (
     new_status  match_status NOT NULL,
     changed_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
-
--- ---------------------------------------------------------------------
--- 9. INDEXES
--- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pickup_schedules (
+    schedule_id  SERIAL PRIMARY KEY,
+    match_id     INT           NOT NULL UNIQUE REFERENCES matches(match_id) ON DELETE CASCADE,
+    scheduled_at TIMESTAMPTZ   NOT NULL,
+    proposed_by  user_role     NOT NULL,
+    status       pickup_status NOT NULL DEFAULT 'proposed',
+    notes        TEXT,
+    created_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    confirmed_at TIMESTAMPTZ
+);
 CREATE INDEX IF NOT EXISTS idx_donors_location      ON donors        USING GIST (location);
 CREATE INDEX IF NOT EXISTS idx_receivers_location   ON receivers     USING GIST (location);
 CREATE INDEX IF NOT EXISTS idx_listings_location    ON food_listings USING GIST (location);
 CREATE INDEX IF NOT EXISTS idx_listings_available   ON food_listings (effective_expiry) WHERE status = 'available';
 CREATE INDEX IF NOT EXISTS idx_matches_receiver_day ON matches       (receiver_id, matched_at);
-
--- =====================================================================
--- SCORING FUNCTIONS
--- =====================================================================
-
+CREATE INDEX IF NOT EXISTS idx_requirements_receiver ON receiver_requirements (receiver_id) WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_pickups_time         ON pickup_schedules (scheduled_at);
+DROP VIEW IF EXISTS v_impact_summary CASCADE;
+DROP VIEW IF EXISTS v_ngo_capacity_today CASCADE;
+DROP VIEW IF EXISTS v_receiver_capacity_today CASCADE;
+DROP VIEW IF EXISTS v_available_listings CASCADE;
+DROP FUNCTION IF EXISTS nearby_listings_for_ngo(INT);
+DROP FUNCTION IF EXISTS nearby_listings_for_receiver(INT);
+DROP FUNCTION IF EXISTS match_food_to_ngos(NUMERIC);
+DROP FUNCTION IF EXISTS match_food_to_receivers(NUMERIC);
+DROP FUNCTION IF EXISTS priority_score(NUMERIC, NUMERIC, NUMERIC);
+DROP FUNCTION IF EXISTS freshness_score(TIMESTAMPTZ, NUMERIC, TIMESTAMPTZ);
 CREATE OR REPLACE FUNCTION freshness_score(
-    p_prepared_at TIMESTAMPTZ,
-    p_decay_rate  NUMERIC,
-    p_at          TIMESTAMPTZ DEFAULT NOW()
+    p_prepared_at      TIMESTAMPTZ,
+    p_effective_expiry TIMESTAMPTZ,
+    p_shape            NUMERIC,
+    p_at               TIMESTAMPTZ DEFAULT NOW()
 ) RETURNS NUMERIC
 LANGUAGE sql STABLE AS $$
-    SELECT ROUND(
-        GREATEST(0, LEAST(100,
-            100 * EXP(-p_decay_rate *
-                GREATEST(0, EXTRACT(EPOCH FROM (p_at - p_prepared_at)) / 3600.0))
-        ))::NUMERIC, 2);
+    SELECT ROUND(GREATEST(0, LEAST(100,
+        100 * (1 - POWER(
+            LEAST(1, GREATEST(0,
+                EXTRACT(EPOCH FROM (p_at - p_prepared_at))
+                / NULLIF(EXTRACT(EPOCH FROM (p_effective_expiry - p_prepared_at)), 0)
+            )),
+            p_shape))
+    ))::NUMERIC, 2);
 $$;
-
 CREATE OR REPLACE FUNCTION urgency_score(
     p_effective_expiry TIMESTAMPTZ,
     p_at               TIMESTAMPTZ DEFAULT NOW()
 ) RETURNS NUMERIC
 LANGUAGE sql STABLE AS $$
     SELECT ROUND(GREATEST(0, LEAST(100,
-        100 - (EXTRACT(EPOCH FROM (p_effective_expiry - p_at)) / 3600.0) * (100.0 / 24)
+        100 * (1 - (EXTRACT(EPOCH FROM (p_effective_expiry - p_at)) / 3600.0) / 24)
     ))::NUMERIC, 2);
 $$;
-
+CREATE OR REPLACE FUNCTION food_priority(
+    p_urgency   NUMERIC,
+    p_freshness NUMERIC
+) RETURNS NUMERIC
+LANGUAGE sql IMMUTABLE AS $$
+    SELECT ROUND((0.6 * p_urgency + 0.4 * (100 - p_freshness))::NUMERIC, 2);
+$$;
 CREATE OR REPLACE FUNCTION proximity_score(
     p_distance_km NUMERIC,
     p_radius_km   NUMERIC
@@ -227,21 +225,31 @@ CREATE OR REPLACE FUNCTION proximity_score(
 LANGUAGE sql IMMUTABLE AS $$
     SELECT ROUND(GREATEST(0, 100 * (1 - p_distance_km / NULLIF(p_radius_km, 0)))::NUMERIC, 2);
 $$;
-
--- Combined priority: 50% urgency + 30% freshness + 20% proximity
-CREATE OR REPLACE FUNCTION priority_score(
-    p_urgency   NUMERIC,
-    p_freshness NUMERIC,
-    p_proximity NUMERIC
+CREATE OR REPLACE FUNCTION requirement_room_kg(
+    p_receiver_id INT,
+    p_category_id INT
 ) RETURNS NUMERIC
-LANGUAGE sql IMMUTABLE AS $$
-    SELECT ROUND((0.5 * p_urgency + 0.3 * p_freshness + 0.2 * p_proximity)::NUMERIC, 2);
+LANGUAGE sql STABLE AS $$
+    SELECT CASE
+        WHEN NOT EXISTS (SELECT 1 FROM receiver_requirements q
+                         WHERE q.receiver_id = p_receiver_id AND q.is_active) THEN NULL
+        ELSE COALESCE((
+            SELECT q.quantity_needed_kg - COALESCE((
+                SELECT SUM(l.quantity_kg)
+                FROM matches m
+                JOIN food_listings l ON l.listing_id = m.listing_id
+                WHERE m.receiver_id = p_receiver_id
+                  AND l.category_id = p_category_id
+                  AND m.matched_at >= date_trunc('day', NOW())
+                  AND m.status IN ('pending', 'accepted', 'picked_up', 'completed')
+            ), 0)
+            FROM receiver_requirements q
+            WHERE q.receiver_id = p_receiver_id
+              AND q.category_id = p_category_id
+              AND q.is_active
+        ), 0)
+    END;
 $$;
-
--- =====================================================================
--- TRIGGERS
--- =====================================================================
-
 CREATE OR REPLACE FUNCTION trg_listing_prepare() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -250,53 +258,41 @@ BEGIN
     IF NEW.location IS NULL THEN
         SELECT location INTO NEW.location FROM donors WHERE donor_id = NEW.donor_id;
     END IF;
-
     SELECT max_safe_hours INTO v_safe_hours
     FROM food_categories WHERE category_id = NEW.category_id;
-
     NEW.effective_expiry := LEAST(
         NEW.expires_at,
         NEW.prepared_at + make_interval(secs => v_safe_hours * 3600)
     );
-
     IF TG_OP = 'INSERT' AND NEW.effective_expiry <= NOW() THEN
         RAISE EXCEPTION 'Listing "%" is already past its safe consumption time', NEW.title;
     END IF;
-
-    -- Generate random 4-digit pickup code if not provided
     IF NEW.pickup_code IS NULL THEN
         NEW.pickup_code := LPAD((FLOOR(RANDOM() * 9000) + 1000)::TEXT, 4, '0');
     END IF;
-
-    -- Default pickup window to prepared_at -> effective_expiry if not set
     IF NEW.pickup_window_start IS NULL THEN
         NEW.pickup_window_start := NEW.prepared_at;
     END IF;
     IF NEW.pickup_window_end IS NULL THEN
         NEW.pickup_window_end := NEW.effective_expiry;
     END IF;
-
     NEW.updated_at := NOW();
     RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS listing_prepare ON food_listings;
 CREATE TRIGGER listing_prepare
 BEFORE INSERT OR UPDATE OF prepared_at, expires_at, category_id, donor_id, location
 ON food_listings
 FOR EACH ROW EXECUTE FUNCTION trg_listing_prepare();
-
 CREATE OR REPLACE FUNCTION trg_match_status_sync() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 BEGIN
     IF TG_OP = 'UPDATE' AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
         RETURN NEW;
     END IF;
-
     INSERT INTO match_history (match_id, old_status, new_status)
     VALUES (NEW.match_id, CASE WHEN TG_OP = 'UPDATE' THEN OLD.status END, NEW.status);
-
     UPDATE food_listings
     SET status = CASE NEW.status
                     WHEN 'pending'   THEN 'matched'::listing_status
@@ -309,57 +305,91 @@ BEGIN
                  END,
         updated_at = NOW()
     WHERE listing_id = NEW.listing_id;
-
+    IF NEW.status IN ('rejected', 'cancelled') THEN
+        UPDATE pickup_schedules SET status = 'cancelled'
+        WHERE match_id = NEW.match_id AND status IN ('proposed', 'confirmed');
+    ELSIF NEW.status = 'picked_up' THEN
+        UPDATE pickup_schedules SET status = 'completed'
+        WHERE match_id = NEW.match_id AND status IN ('proposed', 'confirmed');
+    END IF;
     RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS match_status_sync ON matches;
 CREATE TRIGGER match_status_sync
 AFTER INSERT OR UPDATE OF status ON matches
 FOR EACH ROW EXECUTE FUNCTION trg_match_status_sync();
-
--- =====================================================================
--- VIEWS
--- =====================================================================
-
--- Live feed of available food with freshness and time remaining
-CREATE OR REPLACE VIEW v_available_listings AS
+CREATE OR REPLACE FUNCTION trg_pickup_validate() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_expiry TIMESTAMPTZ;
+    v_status match_status;
+BEGIN
+    SELECT l.effective_expiry, m.status INTO v_expiry, v_status
+    FROM matches m
+    JOIN food_listings l ON l.listing_id = m.listing_id
+    WHERE m.match_id = NEW.match_id;
+    IF NEW.status IN ('proposed', 'confirmed') THEN
+        IF v_status NOT IN ('pending', 'accepted') THEN
+            RAISE EXCEPTION 'A pickup can only be scheduled for a pending or accepted match';
+        END IF;
+        IF NEW.scheduled_at > v_expiry THEN
+            RAISE EXCEPTION 'Pickup time must be before the food expires (%)', v_expiry;
+        END IF;
+        IF TG_OP = 'INSERT' AND NEW.scheduled_at < NOW() - INTERVAL '5 minutes' THEN
+            RAISE EXCEPTION 'Pickup time cannot be in the past';
+        END IF;
+    END IF;
+    IF NEW.status = 'confirmed' AND NEW.confirmed_at IS NULL THEN
+        NEW.confirmed_at := NOW();
+    END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS pickup_validate ON pickup_schedules;
+CREATE TRIGGER pickup_validate
+BEFORE INSERT OR UPDATE ON pickup_schedules
+FOR EACH ROW EXECUTE FUNCTION trg_pickup_validate();
+CREATE VIEW v_available_listings AS
 SELECT
-    l.listing_id,
-    l.title,
-    d.name                        AS donor_name,
-    d.donor_type,
-    c.name                        AS category,
-    l.quantity_kg,
-    l.servings,
-    l.prepared_at,
-    l.effective_expiry,
-    ROUND((EXTRACT(EPOCH FROM (l.effective_expiry - NOW())) / 3600.0)::NUMERIC, 2) AS hours_left,
-    freshness_score(l.prepared_at, c.decay_rate) AS freshness,
-    urgency_score(l.effective_expiry)            AS urgency,
+    x.*,
     CASE
-        WHEN freshness_score(l.prepared_at, c.decay_rate) >= 70 THEN 'GREEN'
-        WHEN freshness_score(l.prepared_at, c.decay_rate) >= 40 THEN 'YELLOW'
+        WHEN x.freshness >= 70 THEN 'GREEN'
+        WHEN x.freshness >= 40 THEN 'YELLOW'
         ELSE 'RED'
-    END                           AS freshness_band,
-    c.requires_refrigeration,
-    l.is_veg,
-    l.allergens,
-    l.suitable_for_animals,
-    l.pickup_instructions,
-    l.pickup_code,
-    l.pickup_window_start,
-    l.pickup_window_end,
-    l.location
-FROM food_listings l
-JOIN donors          d ON d.donor_id    = l.donor_id
-JOIN food_categories c ON c.category_id = l.category_id
-WHERE l.status = 'available'
-  AND l.effective_expiry > NOW();
-
--- Receiver capacity view
-CREATE OR REPLACE VIEW v_receiver_capacity_today AS
+    END                                AS freshness_band,
+    food_priority(x.urgency, x.freshness) AS priority
+FROM (
+    SELECT
+        l.listing_id,
+        l.title,
+        d.name                        AS donor_name,
+        d.donor_type,
+        l.category_id,
+        c.name                        AS category,
+        l.quantity_kg,
+        l.servings,
+        l.prepared_at,
+        l.effective_expiry,
+        ROUND((EXTRACT(EPOCH FROM (l.effective_expiry - NOW())) / 3600.0)::NUMERIC, 2) AS hours_left,
+        freshness_score(l.prepared_at, l.effective_expiry, c.spoilage_shape) AS freshness,
+        urgency_score(l.effective_expiry)                                    AS urgency,
+        c.requires_refrigeration,
+        l.is_veg,
+        l.allergens,
+        l.suitable_for_animals,
+        l.pickup_instructions,
+        l.pickup_code,
+        l.pickup_window_start,
+        l.pickup_window_end,
+        l.location
+    FROM food_listings l
+    JOIN donors          d ON d.donor_id    = l.donor_id
+    JOIN food_categories c ON c.category_id = l.category_id
+    WHERE l.status = 'available'
+      AND l.effective_expiry > NOW()
+) x;
+CREATE VIEW v_receiver_capacity_today AS
 SELECT
     r.receiver_id,
     r.name,
@@ -374,33 +404,20 @@ LEFT JOIN matches m
       AND m.status IN ('pending', 'accepted', 'picked_up', 'completed')
 LEFT JOIN food_listings l ON l.listing_id = m.listing_id
 GROUP BY r.receiver_id, r.name, r.receiver_type, r.daily_capacity_kg;
-
--- Backward compatibility alias for ngo capacity
-CREATE OR REPLACE VIEW v_ngo_capacity_today AS
-SELECT
-    receiver_id       AS ngo_id,
-    name,
-    daily_capacity_kg,
-    committed_kg,
-    remaining_kg
+CREATE VIEW v_ngo_capacity_today AS
+SELECT receiver_id AS ngo_id, name, daily_capacity_kg, committed_kg, remaining_kg
 FROM v_receiver_capacity_today;
-
--- =====================================================================
--- CORE OPERATIONS
--- =====================================================================
-
--- Nearby listings for a receiver
-CREATE OR REPLACE FUNCTION nearby_listings_for_receiver(p_receiver_id INT)
+CREATE FUNCTION nearby_listings_for_receiver(p_receiver_id INT)
 RETURNS TABLE (
-    listing_id     INT,
-    title          VARCHAR,
-    category       VARCHAR,
-    quantity_kg    NUMERIC,
-    hours_left     NUMERIC,
-    freshness      NUMERIC,
-    distance_km    NUMERIC,
-    priority       NUMERIC,
-    is_veg         BOOLEAN,
+    listing_id           INT,
+    title                VARCHAR,
+    category             VARCHAR,
+    quantity_kg          NUMERIC,
+    hours_left           NUMERIC,
+    freshness            NUMERIC,
+    distance_km          NUMERIC,
+    priority             NUMERIC,
+    is_veg               BOOLEAN,
     suitable_for_animals BOOLEAN,
     pickup_instructions  TEXT
 )
@@ -413,11 +430,7 @@ LANGUAGE sql STABLE AS $$
         v.hours_left,
         v.freshness,
         ROUND((ST_Distance(v.location, r.location) / 1000.0)::NUMERIC, 2) AS distance_km,
-        priority_score(
-            v.urgency,
-            v.freshness,
-            proximity_score((ST_Distance(v.location, r.location) / 1000.0)::NUMERIC, r.service_radius_km)
-        ) AS priority,
+        v.priority,
         v.is_veg,
         v.suitable_for_animals,
         v.pickup_instructions
@@ -428,34 +441,25 @@ LANGUAGE sql STABLE AS $$
       AND ST_DWithin(v.location, r.location, r.service_radius_km * 1000)
       AND (NOT v.requires_refrigeration OR r.has_refrigeration)
       AND (r.receiver_type != 'animal_shelter' OR v.suitable_for_animals)
-    ORDER BY priority DESC, v.hours_left ASC;
+      AND COALESCE(requirement_room_kg(r.receiver_id, v.category_id), 1) > 0
+    ORDER BY v.priority DESC, distance_km ASC;
 $$;
-
--- Compatibility alias for nearby_listings_for_ngo
-CREATE OR REPLACE FUNCTION nearby_listings_for_ngo(p_ngo_id INT)
+CREATE FUNCTION nearby_listings_for_ngo(p_ngo_id INT)
 RETURNS TABLE (
-    listing_id     INT,
-    title          VARCHAR,
-    category       VARCHAR,
-    quantity_kg    NUMERIC,
-    hours_left     NUMERIC,
-    freshness      NUMERIC,
-    distance_km    NUMERIC,
-    priority       NUMERIC
+    listing_id  INT,
+    title       VARCHAR,
+    category    VARCHAR,
+    quantity_kg NUMERIC,
+    hours_left  NUMERIC,
+    freshness   NUMERIC,
+    distance_km NUMERIC,
+    priority    NUMERIC
 )
 LANGUAGE sql STABLE AS $$
-    SELECT
-        listing_id, title, category, quantity_kg, hours_left, freshness, distance_km, priority
+    SELECT listing_id, title, category, quantity_kg, hours_left, freshness, distance_km, priority
     FROM nearby_listings_for_receiver(p_ngo_id);
 $$;
-
--- Expiry-aware scheduler: greedy matching.
--- Rules:
--- 1. Never match expired or unsafe food (v_available_listings enforces effective_expiry > NOW() and freshness >= min)
--- 2. Only approved, active receivers can get food
--- 3. Human receivers get priority (human boost bonus in ordering)
--- 4. Animal shelters ONLY receive food marked suitable_for_animals
-CREATE OR REPLACE FUNCTION match_food_to_receivers(p_min_freshness NUMERIC DEFAULT 20)
+CREATE FUNCTION match_food_to_receivers(p_min_freshness NUMERIC DEFAULT 20)
 RETURNS TABLE (out_listing_id INT, out_receiver_id INT, out_priority NUMERIC, out_distance_km NUMERIC)
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -463,23 +467,17 @@ DECLARE
     v_best    RECORD;
 BEGIN
     PERFORM pg_advisory_xact_lock(hashtext('freshlink_matcher'));
-
     FOR v_listing IN
         SELECT *
         FROM v_available_listings
         WHERE freshness >= p_min_freshness
-          AND effective_expiry > NOW()
-        ORDER BY effective_expiry ASC, freshness DESC
+        ORDER BY priority DESC, effective_expiry ASC
     LOOP
         SELECT
             r.receiver_id,
             ROUND((ST_Distance(v_listing.location, r.location) / 1000.0)::NUMERIC, 2) AS dist_km,
-            priority_score(
-                v_listing.urgency,
-                v_listing.freshness,
-                proximity_score((ST_Distance(v_listing.location, r.location) / 1000.0)::NUMERIC,
-                                r.service_radius_km)
-            ) AS prio,
+            proximity_score((ST_Distance(v_listing.location, r.location) / 1000.0)::NUMERIC,
+                            r.service_radius_km) AS proximity,
             CASE WHEN r.receiver_type = 'animal_shelter' THEN 0 ELSE 1 END AS is_human
         INTO v_best
         FROM receivers r
@@ -490,43 +488,35 @@ BEGIN
           AND cap.remaining_kg >= v_listing.quantity_kg
           AND (NOT v_listing.requires_refrigeration OR r.has_refrigeration)
           AND (r.receiver_type != 'animal_shelter' OR v_listing.suitable_for_animals)
+          AND COALESCE(requirement_room_kg(r.receiver_id, v_listing.category_id), v_listing.quantity_kg) >= v_listing.quantity_kg
           AND NOT EXISTS (
               SELECT 1 FROM matches m
               WHERE m.listing_id = v_listing.listing_id
                 AND m.receiver_id = r.receiver_id
-                AND m.status = 'rejected')
-        ORDER BY
-            is_human DESC,  -- Human receivers get priority over animal shelters
-            prio DESC,
-            dist_km ASC
+                AND m.status IN ('rejected', 'cancelled'))
+        ORDER BY is_human DESC, proximity DESC, dist_km ASC
         LIMIT 1;
-
         IF FOUND THEN
             INSERT INTO matches (listing_id, receiver_id, priority_score, freshness_at_match, distance_km)
-            VALUES (v_listing.listing_id, v_best.receiver_id, v_best.prio, v_listing.freshness, v_best.dist_km);
-
+            VALUES (v_listing.listing_id, v_best.receiver_id, v_listing.priority, v_listing.freshness, v_best.dist_km);
             out_listing_id  := v_listing.listing_id;
             out_receiver_id := v_best.receiver_id;
-            out_priority    := v_best.prio;
+            out_priority    := v_listing.priority;
             out_distance_km := v_best.dist_km;
             RETURN NEXT;
         END IF;
     END LOOP;
 END;
 $$;
-
--- Compatibility alias for match_food_to_ngos
-CREATE OR REPLACE FUNCTION match_food_to_ngos(p_min_freshness NUMERIC DEFAULT 20)
+CREATE FUNCTION match_food_to_ngos(p_min_freshness NUMERIC DEFAULT 20)
 RETURNS TABLE (out_listing_id INT, out_ngo_id INT, out_priority NUMERIC, out_distance_km NUMERIC)
 LANGUAGE plpgsql AS $$
 BEGIN
     RETURN QUERY
-    SELECT out_listing_id, out_receiver_id, out_priority, out_distance_km
-    FROM match_food_to_receivers(p_min_freshness);
+    SELECT f.out_listing_id, f.out_receiver_id, f.out_priority, f.out_distance_km
+    FROM match_food_to_receivers(p_min_freshness) f;
 END;
 $$;
-
--- Housekeeping
 CREATE OR REPLACE FUNCTION expire_stale_listings(p_pending_timeout_min INT DEFAULT 30)
 RETURNS TABLE (expired_listings INT, cancelled_matches INT)
 LANGUAGE plpgsql AS $$
@@ -542,7 +532,6 @@ BEGIN
       AND (l.effective_expiry <= NOW()
            OR m.matched_at < NOW() - make_interval(mins => p_pending_timeout_min));
     GET DIAGNOSTICS v_cancelled = ROW_COUNT;
-
     UPDATE food_listings
     SET status = 'expired', updated_at = NOW()
     WHERE status IN ('available', 'matched')
@@ -551,18 +540,16 @@ BEGIN
                       WHERE m.listing_id = food_listings.listing_id
                         AND m.status IN ('accepted', 'picked_up'));
     GET DIAGNOSTICS v_expired = ROW_COUNT;
-
+    UPDATE pickup_schedules
+    SET status = 'missed'
+    WHERE status IN ('proposed', 'confirmed')
+      AND scheduled_at < NOW() - INTERVAL '2 hours';
     expired_listings  := v_expired;
     cancelled_matches := v_cancelled;
     RETURN NEXT;
 END;
 $$;
-
--- =====================================================================
--- REPORTING
--- =====================================================================
-
-CREATE OR REPLACE VIEW v_impact_summary AS
+CREATE VIEW v_impact_summary AS
 SELECT
     d.donor_type,
     COUNT(*) FILTER (WHERE l.status = 'delivered')                        AS deliveries,
