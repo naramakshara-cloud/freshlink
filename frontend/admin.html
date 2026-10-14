@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FreshLink – Admin panel</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="guarded">
+  <nav class="navbar" id="navbar"></nav>
+  <header class="page-hero impact-hero">
+    <div class="hero-content">
+      <h1>Admin panel</h1>
+      <p>Check new receivers before they can collect food.</p>
+    </div>
+  </header>
+  <main class="container">
+    <div id="toast" class="toast hidden"></div>
+    <section class="card">
+      <h2 class="card-title">⏳ Waiting for approval</h2>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Name</th><th>Type</th><th>Address</th><th>Capacity</th><th>Fridge</th><th></th></tr>
+          </thead>
+          <tbody id="pendingBody"><tr><td colspan="6" class="loading-row">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="card">
+      <h2 class="card-title">🤝 All receivers</h2>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th>Name</th><th>Type</th><th>Status</th><th>Capacity</th><th>Fridge</th><th></th></tr>
+          </thead>
+          <tbody id="allBody"><tr><td colspan="6" class="loading-row">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>

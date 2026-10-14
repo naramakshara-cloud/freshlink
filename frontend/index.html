@@ -6,33 +6,21 @@
   <title>FreshLink – Hyperlocal Food Rescue & Redistribution</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-  <nav class="navbar">
-    <span class="logo">🌿 FreshLink</span>
-    <div class="nav-links">
-      <a href="index.html" class="active">Home</a>
-      <a href="donor.html">Post Food</a>
-      <a href="ngo.html">Receiver Dashboard</a>
-      <a href="impact.html">Impact</a>
-      <a href="login.html" class="btn btn-secondary" style="padding:.25rem .75rem" id="navLoginBtn">Login</a>
-    </div>
-  </nav>
-
+<body class="guarded">
+  <nav class="navbar" id="navbar"></nav>
   <header class="page-hero">
     <div class="hero-content" style="max-width:760px">
       <h1>Connecting Surplus Food to Those Who Need It Most</h1>
       <p style="font-size:1.15rem;margin-top:.75rem">
         FreshLink matches edible surplus food from college hostels, campus canteens, households, and restaurants to nearby verified shelters, NGOs, and families before it spoils.
       </p>
-
       <div class="hero-cta">
         <a href="signup.html?role=donor" class="btn btn-primary btn-lg">🥗 I Want to Donate Food</a>
         <a href="signup.html?role=receiver" class="btn btn-secondary btn-lg">🤝 I Need Food</a>
-        <a href="login.html" class="btn btn-lg" style="background:var(--white);border:1px solid var(--gray-200)">🔑 Login</a>
+        <a href="login.html" class="btn btn-lg" style="background:var(--white);border:1px solid var(--gray-200)">🔑 Log in</a>
       </div>
     </div>
   </header>
-
   <main class="container">
     <div class="features-grid">
       <div class="feature-card">
@@ -42,7 +30,6 @@
           Food quality is modeled with half-life decay curves and hard safety bounds. Donors post once, and our algorithm prioritizes urgent pickups before expiration.
         </div>
       </div>
-
       <div class="feature-card">
         <div class="feature-icon">📍</div>
         <div class="feature-title">Hyperlocal PostGIS Matching</div>
@@ -50,7 +37,6 @@
           Using spatial GIS geometry, food is routed to nearby verified receivers within their exact operational radius to minimize transport delays and transit spoilage.
         </div>
       </div>
-
       <div class="feature-card">
         <div class="feature-icon">🐾</div>
         <div class="feature-title">Human & Animal Safety Priority</div>
@@ -58,7 +44,6 @@
           Human shelters receive top allocation priority. Animal shelters are matched exclusively with food explicitly verified as safe for animal consumption.
         </div>
       </div>
-
       <div class="feature-card">
         <div class="feature-icon">🔒</div>
         <div class="feature-title">Confidential Handover Codes</div>
@@ -67,8 +52,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Live Quick Links -->
     <div class="card" style="margin-top:2rem;text-align:center;padding:2rem">
       <h2 style="font-size:1.3rem;margin-bottom:.5rem">Ready to make an impact?</h2>
       <p style="color:var(--gray-600);margin-bottom:1.5rem">Join the community in preventing food waste and feeding local shelters.</p>
@@ -78,17 +61,10 @@
       </div>
     </div>
   </main>
-
   <script src="api.js"></script>
+  <script src="nav.js"></script>
   <script>
-    // Quick session check to toggle Login/Profile button
-    apiFetch('/auth/me').then(user => {
-      const btn = document.getElementById('navLoginBtn');
-      if (btn && user) {
-        btn.textContent = `${user.full_name.split(' ')[0]} (${user.role})`;
-        btn.href = user.role === 'donor' ? 'donor.html' : (user.role === 'receiver' ? 'ngo.html' : 'impact.html');
-      }
-    }).catch(() => {});
+    initPage({ guestOnly: true });
   </script>
 </body>
 </html>

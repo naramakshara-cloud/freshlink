@@ -1,13 +1,11 @@
-"""
-FreshLink FastAPI Backend with Secure JWT & Role-Based Access Control
-Connects the frontend to PostgreSQL + PostGIS database.
-"""
-
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from pathlib import Path
+from contextlib import asynccontextmanager
+import asyncio
 import psycopg2
 import psycopg2.extras
 import subprocess
@@ -16,29 +14,13 @@ import datetime
 import bcrypt
 import jwt
 from dotenv import load_dotenv
-
-# ── Load Environment Variables ────────────────────────────────────────────────
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 load_dotenv()
-
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-freshlink-jwt-key-2026")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 24
-
-app = FastAPI(title="FreshLink API", version="2.5")
-
-# Support credentials (cookies) in CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5500", "http://127.0.0.1:5500", "http://localhost:8000", "http://127.0.0.1:8000"],
-    allow_origin_regex=".*",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ── Database Connection ────────────────────────────────────────────────────────
+MATCH_INTERVAL_SECONDS = 300
 DB_CONFIG = {
     "dbname":   os.getenv("DB_NAME",     "freshlink"),
     "user":     os.getenv("DB_USER",     "postgres"),
@@ -46,10 +28,8 @@ DB_CONFIG = {
     "host":     os.getenv("DB_HOST",     "localhost"),
     "port":     os.getenv("DB_PORT",     "5432"),
 }
-
 def get_conn():
     return psycopg2.connect(**DB_CONFIG)
-
 def query(sql: str, params=None, fetch="all"):
     conn = get_conn()
     try:
@@ -63,26 +43,51 @@ def query(sql: str, params=None, fetch="all"):
             return None
     finally:
         conn.close()
-
-
-# ── Password & Token Helpers ───────────────────────────────────────────────────
-
+def run_auto_match() -> int:
+    try:
+        rows = query("SELECT * FROM match_food_to_receivers()")
+        return len(rows)
+    except Exception as e:
+        print(f"[auto-match] matching failed: {e}")
+        return 0
+def run_housekeeping_and_matching():
+    try:
+        query("SELECT * FROM expire_stale_listings()")
+    except Exception as e:
+        print(f"[auto-match] housekeeping failed: {e}")
+    created = run_auto_match()
+    print(f"[auto-match] {datetime.datetime.now():%H:%M:%S} scheduled run: {created} new match(es)")
+async def background_scheduler():
+    while True:
+        await asyncio.to_thread(run_housekeeping_and_matching)
+        await asyncio.sleep(MATCH_INTERVAL_SECONDS)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(background_scheduler())
+    print(f"[auto-match] background scheduler started (every {MATCH_INTERVAL_SECONDS // 60} min)")
+    yield
+    task.cancel()
+app = FastAPI(title="FreshLink API", version="2.6", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt(rounds=12)
     return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
     except Exception:
         return False
-
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=JWT_EXPIRE_HOURS)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
 def decode_access_token(token: str) -> dict:
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
@@ -91,27 +96,18 @@ def decode_access_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired. Please log in again.")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token.")
-
-
-# ── Current User & Role Security Dependencies ──────────────────────────────────
-
 async def get_current_user(request: Request) -> dict:
-    # 1. Check HttpOnly cookie first
     token = request.cookies.get("access_token")
-    # 2. Check Authorization Bearer header as secondary fallback
     if not token:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ", 1)[1]
-
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required. Please log in.")
-
     payload = decode_access_token(token)
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims.")
-
     user = query(
         "SELECT user_id, email, full_name, phone, role, is_active, created_at FROM users WHERE user_id = %s",
         (user_id,),
@@ -121,17 +117,15 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found.")
     if not user["is_active"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is deactivated.")
-
-    # Attach profile IDs
     donor = query("SELECT donor_id, name FROM donors WHERE user_id = %s", (user_id,), fetch="one")
     receiver = query("SELECT receiver_id, name, verification_status FROM receivers WHERE user_id = %s", (user_id,), fetch="one")
     user_dict = dict(user)
     user_dict["donor_id"] = donor["donor_id"] if donor else None
     user_dict["receiver_id"] = receiver["receiver_id"] if receiver else None
     user_dict["verification_status"] = receiver["verification_status"] if receiver else None
+    user_dict["donor_name"] = donor["name"] if donor else None
+    user_dict["receiver_name"] = receiver["name"] if receiver else None
     return user_dict
-
-
 def require_role(allowed_roles: List[str]):
     def role_checker(current_user: dict = Depends(get_current_user)) -> dict:
         if current_user["role"] not in allowed_roles:
@@ -141,75 +135,52 @@ def require_role(allowed_roles: List[str]):
             )
         return current_user
     return role_checker
-
-
-# ── Pydantic Request/Response Models ───────────────────────────────────────────
-
 class UserSignup(BaseModel):
     email:     str
     password:  str
     full_name: str
     phone:     str
-    role:      str  # "donor" | "receiver"
-
-    # Profile details
+    role:      str
     address:               Optional[str] = None
     latitude:              Optional[float] = None
     longitude:             Optional[float] = None
-
-    # Donor fields
-    donor_type:            Optional[str] = "other"  # hostel, canteen, household, restaurant, event, other
-
-    # Receiver fields
-    receiver_type:         Optional[str] = "individual_or_family"  # individual_or_family, ngo, animal_shelter, orphanage, old_age_home, community_kitchen
+    donor_type:            Optional[str] = "other"
+    receiver_type:         Optional[str] = "individual_or_family"
     daily_capacity_kg:     Optional[float] = None
     feed_count:            Optional[int] = None
     has_refrigeration:     Optional[bool] = False
-
 class UserLogin(BaseModel):
     email:    str
     password: str
-
 class ListingCreate(BaseModel):
     category_id:          int
     title:                str
     description:          Optional[str] = None
     quantity_kg:          float
     servings:             Optional[int] = None
-    prepared_at:          str   # ISO datetime string
-    expires_at:           str   # ISO datetime string
+    prepared_at:          str
+    expires_at:           str
     is_veg:               Optional[bool] = True
     allergens:            Optional[str] = None
     suitable_for_animals: Optional[bool] = False
     pickup_instructions:  Optional[str] = None
-
 class MatchAction(BaseModel):
-    action:      str            # "accepted" | "rejected" | "picked_up" | "completed" | "cancelled"
-    pickup_code: Optional[str] = None  # required when action == "picked_up"
-
+    action:      str
+    pickup_code: Optional[str] = None
 class ReceiverApproval(BaseModel):
-    verification_status: str  # "approved" | "rejected" | "pending"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# AUTHENTICATION ENDPOINTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
+    verification_status: str
 @app.post("/auth/signup", status_code=status.HTTP_201_CREATED)
 def signup(data: UserSignup, response: Response):
     if data.role not in ("donor", "receiver"):
         raise HTTPException(status_code=400, detail="Signup role must be 'donor' or 'receiver'. Admin accounts must be created by CLI.")
     if len(data.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
-
     existing = query("SELECT user_id FROM users WHERE email = %s", (data.email.strip().lower(),), fetch="one")
     if existing:
         raise HTTPException(status_code=400, detail="Email is already registered.")
-
     lat = data.latitude if data.latitude is not None else 12.9716
     lng = data.longitude if data.longitude is not None else 77.5946
     addr = data.address.strip() if data.address else "Bengaluru"
-
     pwd_hash = hash_password(data.password)
     new_user = query(
         """
@@ -220,10 +191,7 @@ def signup(data: UserSignup, response: Response):
         (data.email.strip().lower(), pwd_hash, data.full_name.strip(), data.phone.strip(), data.role),
         fetch="one"
     )
-
     user_id = new_user["user_id"]
-
-    # Create associated profile record
     if data.role == "donor":
         dtype = data.donor_type if data.donor_type in ("hostel", "canteen", "household", "restaurant", "event", "other") else "other"
         query(
@@ -239,16 +207,14 @@ def signup(data: UserSignup, response: Response):
         cap = data.daily_capacity_kg
         if cap is None:
             cap = 5.0 if rtype == "individual_or_family" else 50.0
-
         query(
             """
             INSERT INTO receivers (user_id, name, receiver_type, verification_status, contact_phone, email, address, location, service_radius_km, daily_capacity_kg, has_refrigeration, is_active)
-            VALUES (%s, %s, %s, 'approved', %s, %s, %s, ST_MakePoint(%s, %s)::geography, 5.0, %s, %s, TRUE)
+            VALUES (%s, %s, %s, 'pending', %s, %s, %s, ST_MakePoint(%s, %s)::geography, 5.0, %s, %s, TRUE)
             """,
             (user_id, data.full_name.strip(), rtype, data.phone.strip(), data.email.strip().lower(), addr, lng, lat, cap, bool(data.has_refrigeration)),
             fetch=None
         )
-
     token = create_access_token({"sub": str(new_user["user_id"]), "role": new_user["role"], "email": new_user["email"]})
     response.set_cookie(
         key="access_token",
@@ -263,8 +229,6 @@ def signup(data: UserSignup, response: Response):
         "user": dict(new_user),
         "access_token": token,
     }
-
-
 @app.post("/auth/login")
 def login(data: UserLogin, response: Response):
     user = query(
@@ -276,7 +240,6 @@ def login(data: UserLogin, response: Response):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
     if not user["is_active"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated.")
-
     token = create_access_token({"sub": str(user["user_id"]), "role": user["role"], "email": user["email"]})
     response.set_cookie(
         key="access_token",
@@ -293,29 +256,17 @@ def login(data: UserLogin, response: Response):
         "user": user_data,
         "access_token": token,
     }
-
-
 @app.post("/auth/logout")
 def logout(response: Response):
     response.delete_cookie(key="access_token")
     return {"message": "Logged out successfully"}
-
-
 @app.get("/auth/me")
 def get_my_profile(current_user: dict = Depends(get_current_user)):
-    # Returns the authenticated user profile with linked donor/receiver ids
     profile = current_user.copy()
     profile.pop("password_hash", None)
     return profile
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ADMIN-ONLY ENDPOINTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
 @app.get("/users")
 def list_users(current_user: dict = Depends(require_role(["admin"]))):
-    """Admin-only: list all users. Password hashes are strictly omitted."""
     rows = query(
         """
         SELECT user_id, email, full_name, phone, role, is_active, created_at
@@ -324,39 +275,30 @@ def list_users(current_user: dict = Depends(require_role(["admin"]))):
         """
     )
     return [dict(r) for r in rows]
-
-
 @app.patch("/receivers/{receiver_id}/approval")
 def approve_receiver(receiver_id: int, body: ReceiverApproval, current_user: dict = Depends(require_role(["admin"]))):
-    """Admin-only: approve, reject, or set pending verification for receivers."""
     if body.verification_status not in ("approved", "rejected", "pending"):
         raise HTTPException(status_code=400, detail="Invalid verification status.")
     receiver = query("SELECT receiver_id, name FROM receivers WHERE receiver_id = %s", (receiver_id,), fetch="one")
     if not receiver:
         raise HTTPException(status_code=404, detail="Receiver not found.")
-
     query(
         "UPDATE receivers SET verification_status = %s WHERE receiver_id = %s",
         (body.verification_status, receiver_id),
         fetch=None
     )
+    if body.verification_status == "approved":
+        run_auto_match()
     return {"receiver_id": receiver_id, "verification_status": body.verification_status, "message": "Status updated"}
-
-
 @app.post("/matches/run")
 def run_matcher(current_user: dict = Depends(require_role(["admin"]))):
-    """Admin-only: trigger greedy matching algorithm manually."""
     rows = query("SELECT * FROM match_food_to_receivers()")
     return {"matched": len(rows), "results": [dict(r) for r in rows]}
-
-
 @app.post("/admin/reset")
 def reset_demo_data(current_user: dict = Depends(require_role(["admin"]))):
-    """Admin-only: reloads schema.sql, seed.sql, and demo_seed.sql."""
     db_dir = Path(__file__).parent.parent / "database"
     env = os.environ.copy()
     env["PGPASSWORD"] = DB_CONFIG["password"]
-
     for fname in ["schema.sql", "seed.sql", "demo_seed.sql"]:
         fpath = db_dir / fname
         if not fpath.exists():
@@ -379,17 +321,9 @@ def reset_demo_data(current_user: dict = Depends(require_role(["admin"]))):
                 status_code=500,
                 detail=f"Error executing {fname}: {result.stderr[:500]}"
             )
-
     return {"message": "Demo data reset successfully"}
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DONORS & FOOD LISTINGS ENDPOINTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
 @app.get("/donors")
-def list_donors(current_user: dict = Depends(get_current_user)):
-    """List donors (authenticated users)."""
+def list_donors(current_user: dict = Depends(require_role(["admin"]))):
     rows = query(
         """
         SELECT donor_id, user_id, name, donor_type, contact_phone, email, address, is_verified
@@ -398,18 +332,12 @@ def list_donors(current_user: dict = Depends(get_current_user)):
         """
     )
     return [dict(r) for r in rows]
-
-
 @app.post("/listings", status_code=status.HTTP_201_CREATED)
 def create_listing(body: ListingCreate, current_user: dict = Depends(require_role(["donor", "admin"]))):
-    """Donors can only create food listings under their own donor profile."""
-    # Find donor profile
     donor = query("SELECT donor_id FROM donors WHERE user_id = %s", (current_user["user_id"],), fetch="one")
     if not donor and current_user["role"] != "admin":
         raise HTTPException(status_code=400, detail="You do not have an active donor profile configured.")
-
     donor_id = donor["donor_id"] if donor else query("SELECT donor_id FROM donors LIMIT 1", fetch="one")["donor_id"]
-
     try:
         row = query(
             """
@@ -425,59 +353,81 @@ def create_listing(body: ListingCreate, current_user: dict = Depends(require_rol
              body.is_veg, body.allergens, body.suitable_for_animals, body.pickup_instructions),
             fetch="one",
         )
-        # Note: Pickup code is returned ONLY to the creator donor here!
-        return {
-            "listing_id": row["listing_id"],
-            "pickup_code": row["pickup_code"],
-            "message": "Listing created. Keep this 4-digit pickup code safe to confirm handoff."
-        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
+    run_auto_match()
+    matched = query(
+        """
+        SELECT r.name AS receiver_name
+        FROM matches m
+        JOIN receivers r ON r.receiver_id = m.receiver_id
+        WHERE m.listing_id = %s AND m.status = 'pending'
+        LIMIT 1
+        """,
+        (row["listing_id"],),
+        fetch="one",
+    )
+    if matched:
+        message = f"Listing created and matched to {matched['receiver_name']}. Keep this 4-digit pickup code safe to confirm handoff."
+    else:
+        message = "Listing created. No suitable receiver right now; the system keeps trying every few minutes. Keep this 4-digit pickup code safe."
+    return {
+        "listing_id": row["listing_id"],
+        "pickup_code": row["pickup_code"],
+        "matched_to": matched["receiver_name"] if matched else None,
+        "message": message,
+    }
 @app.get("/listings/my")
 def get_my_listings(current_user: dict = Depends(require_role(["donor", "admin"]))):
-    """Donors can view their own listings, including their confidential pickup_code."""
     donor = query("SELECT donor_id FROM donors WHERE user_id = %s", (current_user["user_id"],), fetch="one")
     if not donor and current_user["role"] != "admin":
         return []
-
     donor_id = donor["donor_id"] if donor else None
     if donor_id:
         rows = query(
             """
             SELECT l.listing_id, l.title, l.quantity_kg, l.servings, l.prepared_at,
                    l.effective_expiry, l.status, l.pickup_code, l.pickup_instructions,
-                   c.name AS category
+                   c.name AS category, am.match_status, am.receiver_name
             FROM food_listings l
             JOIN food_categories c ON c.category_id = l.category_id
+            LEFT JOIN LATERAL (
+                SELECT m.status AS match_status, r.name AS receiver_name
+                FROM matches m
+                JOIN receivers r ON r.receiver_id = m.receiver_id
+                WHERE m.listing_id = l.listing_id
+                  AND m.status IN ('pending', 'accepted', 'picked_up', 'completed')
+                ORDER BY m.matched_at DESC
+                LIMIT 1
+            ) am ON TRUE
             WHERE l.donor_id = %s
             ORDER BY l.created_at DESC
             """,
             (donor_id,)
         )
     else:
-        # Admin can view all
         rows = query(
             """
             SELECT l.listing_id, l.title, l.quantity_kg, l.servings, l.prepared_at,
                    l.effective_expiry, l.status, l.pickup_code, l.pickup_instructions,
-                   c.name AS category
+                   c.name AS category, am.match_status, am.receiver_name
             FROM food_listings l
             JOIN food_categories c ON c.category_id = l.category_id
+            LEFT JOIN LATERAL (
+                SELECT m.status AS match_status, r.name AS receiver_name
+                FROM matches m
+                JOIN receivers r ON r.receiver_id = m.receiver_id
+                WHERE m.listing_id = l.listing_id
+                  AND m.status IN ('pending', 'accepted', 'picked_up', 'completed')
+                ORDER BY m.matched_at DESC
+                LIMIT 1
+            ) am ON TRUE
             ORDER BY l.created_at DESC
             """
         )
     return [dict(r) for r in rows]
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# RECEIVERS & FOOD ACCESS ENDPOINTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
 @app.get("/receivers")
-def list_receivers(current_user: dict = Depends(get_current_user)):
-    """Receivers/Donors/Admins: view verified receivers."""
+def list_receivers(current_user: dict = Depends(require_role(["admin"]))):
     rows = query(
         """
         SELECT receiver_id, user_id, name, receiver_type, verification_status,
@@ -487,8 +437,6 @@ def list_receivers(current_user: dict = Depends(get_current_user)):
         """
     )
     return [dict(r) for r in rows]
-
-
 @app.get("/receivers/capacity")
 def receiver_capacity(current_user: dict = Depends(get_current_user)):
     rows = query(
@@ -498,24 +446,14 @@ def receiver_capacity(current_user: dict = Depends(get_current_user)):
         """
     )
     return [dict(r) for r in rows]
-
-
 @app.get("/receivers/my/listings")
 def my_nearby_listings(current_user: dict = Depends(require_role(["receiver", "admin"]))):
-    """
-    Receivers can ONLY view food listings near them.
-    SECURITY: The confidential 'pickup_code' is NEVER returned to receivers.
-    """
     receiver = query("SELECT receiver_id, verification_status FROM receivers WHERE user_id = %s", (current_user["user_id"],), fetch="one")
     if not receiver and current_user["role"] != "admin":
         raise HTTPException(status_code=400, detail="No receiver profile linked to this account.")
-
     if receiver and receiver["verification_status"] != "approved" and current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Your receiver organization is pending verification approval.")
-
     rec_id = receiver["receiver_id"] if receiver else query("SELECT receiver_id FROM receivers LIMIT 1", fetch="one")["receiver_id"]
-
-    # Notice: pickup_code is excluded
     rows = query(
         """
         SELECT listing_id, title, category, quantity_kg, hours_left, freshness,
@@ -525,17 +463,10 @@ def my_nearby_listings(current_user: dict = Depends(require_role(["receiver", "a
         (rec_id,)
     )
     return [dict(r) for r in rows]
-
-
 @app.get("/receivers/{receiver_id}/listings")
 def nearby_listings_endpoint(receiver_id: int, current_user: dict = Depends(get_current_user)):
-    """
-    Get listings for specific receiver. Receivers can only view their own; admins can view any.
-    SECURITY: pickup_code is NEVER included.
-    """
     if current_user["role"] == "receiver" and current_user.get("receiver_id") != receiver_id:
         raise HTTPException(status_code=403, detail="Receivers can only view listings within their own radius.")
-
     rows = query(
         """
         SELECT listing_id, title, category, quantity_kg, hours_left, freshness,
@@ -545,35 +476,19 @@ def nearby_listings_endpoint(receiver_id: int, current_user: dict = Depends(get_
         (receiver_id,)
     )
     return [dict(r) for r in rows]
-
-
-# Compatibility aliases for NGO routes
 @app.get("/ngos")
-def list_ngos_alias(current_user: dict = Depends(get_current_user)):
+def list_ngos_alias(current_user: dict = Depends(require_role(["admin"]))):
     return list_receivers(current_user=current_user)
-
 @app.get("/ngos/capacity")
 def ngo_capacity_alias(current_user: dict = Depends(get_current_user)):
     return receiver_capacity(current_user=current_user)
-
 @app.get("/ngos/{ngo_id}/listings")
 def nearby_listings_alias(ngo_id: int, current_user: dict = Depends(get_current_user)):
     return nearby_listings_endpoint(receiver_id=ngo_id, current_user=current_user)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# MATCHES & PICKUP VERIFICATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
 @app.get("/matches")
 def list_matches(current_user: dict = Depends(get_current_user)):
-    """
-    List matches. Receivers only see their own matches; donors see matches for their listings; admins see all.
-    SECURITY: pickup_code is only visible to the donor (or admin). Receivers never see it in matches!
-    """
     user_role = current_user["role"]
     user_id = current_user["user_id"]
-
     if user_role == "receiver":
         rec_id = current_user.get("receiver_id")
         rows = query(
@@ -608,7 +523,7 @@ def list_matches(current_user: dict = Depends(get_current_user)):
             """,
             (donor_id,)
         )
-    else:  # admin
+    else:
         rows = query(
             """
             SELECT m.match_id, m.listing_id, m.receiver_id, m.receiver_id AS ngo_id,
@@ -623,19 +538,11 @@ def list_matches(current_user: dict = Depends(get_current_user)):
             """
         )
     return [dict(r) for r in rows]
-
-
 @app.patch("/matches/{match_id}")
 def update_match(match_id: int, body: MatchAction, current_user: dict = Depends(get_current_user)):
-    """
-    Manage match status.
-    - Receivers can only update their own matches.
-    - When action == 'picked_up', the receiver MUST provide the valid 4-digit pickup_code!
-    """
     valid = ("accepted", "rejected", "picked_up", "completed", "cancelled")
     if body.action not in valid:
         raise HTTPException(status_code=400, detail=f"Invalid action. Must be one of: {valid}")
-
     match = query(
         """
         SELECT m.match_id, m.listing_id, m.receiver_id, m.status, f.pickup_code
@@ -648,12 +555,8 @@ def update_match(match_id: int, body: MatchAction, current_user: dict = Depends(
     )
     if not match:
         raise HTTPException(status_code=404, detail="Match not found.")
-
-    # Permissions check: receivers can only manage their own match
     if current_user["role"] == "receiver" and current_user.get("receiver_id") != match["receiver_id"]:
         raise HTTPException(status_code=403, detail="You do not have permission to manage this match.")
-
-    # Pickup Code Verification: Receiver must enter the secret donor pickup code to mark picked_up
     if body.action == "picked_up":
         expected_code = match["pickup_code"]
         if not body.pickup_code or body.pickup_code.strip() != str(expected_code).strip():
@@ -661,37 +564,25 @@ def update_match(match_id: int, body: MatchAction, current_user: dict = Depends(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Incorrect pickup code. Please obtain the 4-digit pickup code from the food donor."
             )
-
     try:
         query(
             "UPDATE matches SET status = %s, responded_at = NOW() WHERE match_id = %s",
             (body.action, match_id),
             fetch=None,
         )
-        return {"match_id": match_id, "status": body.action, "message": f"Match marked as {body.action} successfully"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PUBLIC / GENERAL METRICS & VIEWS
-# ═══════════════════════════════════════════════════════════════════════════════
-
+    if body.action in ("rejected", "cancelled"):
+        run_auto_match()
+    return {"match_id": match_id, "status": body.action, "message": f"Match marked as {body.action} successfully"}
 @app.get("/categories")
 def list_categories():
-    """Public: food categories with decay limits."""
     rows = query(
         "SELECT category_id, name, requires_refrigeration, decay_rate, max_safe_hours FROM food_categories ORDER BY name"
     )
     return [dict(r) for r in rows]
-
-
 @app.get("/listings/available")
 def available_listings():
-    """
-    Public live feed view of available surplus food.
-    SECURITY: 'pickup_code' is omitted from public view.
-    """
     rows = query(
         """
         SELECT listing_id, title, donor_name, donor_type, category,
@@ -704,11 +595,8 @@ def available_listings():
         """
     )
     return [dict(r) for r in rows]
-
-
 @app.get("/impact")
 def impact_summary():
-    """Public impact dashboard summary."""
     rows = query(
         "SELECT donor_type, deliveries, kg_saved, expired, rescue_rate_pct FROM v_impact_summary"
     )
@@ -727,10 +615,9 @@ def impact_summary():
         "by_donor_type": [dict(r) for r in rows],
         "totals": dict(totals),
     }
-
-
 @app.post("/housekeeping/expire")
 def expire_stale(current_user: dict = Depends(require_role(["admin"]))):
-    """Admin-only housekeeping task."""
     row = query("SELECT * FROM expire_stale_listings()", fetch="one")
     return dict(row)
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
+app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

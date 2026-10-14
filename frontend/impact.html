@@ -6,30 +6,16 @@
   <title>FreshLink – Impact</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-  <nav class="navbar">
-    <span class="logo">🌿 FreshLink</span>
-    <div class="nav-links">
-      <a href="index.html">Home</a>
-      <a href="donor.html">Post Food</a>
-      <a href="ngo.html">Receiver Dashboard</a>
-      <a href="impact.html" class="active">Impact</a>
-      <a href="login.html">Login</a>
-    </div>
-  </nav>
-
+<body class="guarded">
+  <nav class="navbar" id="navbar"></nav>
   <header class="page-hero impact-hero">
     <div class="hero-content">
       <h1>Our Impact</h1>
       <p>Every kilogram counts. Here's what FreshLink has saved so far.</p>
     </div>
   </header>
-
   <main class="container">
-
     <div id="toast" class="toast hidden"></div>
-
-    <!-- ── Big KPI numbers ───────────────────────────── -->
     <div class="kpi-grid" id="kpiGrid">
       <div class="kpi-card">
         <div class="kpi-icon">🍱</div>
@@ -52,8 +38,6 @@
         <div class="kpi-label">Listings Expired</div>
       </div>
     </div>
-
-    <!-- ── CO₂ & meals equivalent ─────────────────── -->
     <div class="equivalents-bar card">
       <div class="equiv-item">
         <span class="equiv-icon">🌳</span>
@@ -70,14 +54,10 @@
         </div>
       </div>
     </div>
-
-    <!-- ── Rescue rate bar chart (CSS-only) ──────── -->
     <section class="card">
       <h2 class="card-title">📊 Rescue Rate by Donor Type</h2>
       <div id="chartContainer" class="bar-chart"></div>
     </section>
-
-    <!-- ── Breakdown table ───────────────────────── -->
     <section class="card">
       <h2 class="card-title">📋 Breakdown by Donor Type</h2>
       <div class="table-wrap">
@@ -97,17 +77,14 @@
         </table>
       </div>
     </section>
-
-    <!-- ── Admin actions ─────────────────────────── -->
-    <div class="housekeeping-row">
+    <div class="housekeeping-row" id="adminTools" style="display:none">
       <button class="btn btn-secondary" id="hkBtn">🧹 Expire Stale Listings</button>
       <button class="btn btn-danger"    id="resetBtn">🔄 Reset Demo Data</button>
       <span id="hkResult" class="hk-result"></span>
     </div>
-
   </main>
-
   <script src="api.js"></script>
+  <script src="nav.js"></script>
   <script src="impact.js"></script>
 </body>
 </html>

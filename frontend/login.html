@@ -3,93 +3,103 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FreshLink – Login</title>
+  <title>FreshLink – Log in</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-  <nav class="navbar">
-    <span class="logo">🌿 FreshLink</span>
-    <div class="nav-links">
-      <a href="index.html">Home</a>
-      <a href="donor.html">Post Food</a>
-      <a href="ngo.html">Receiver Dashboard</a>
-      <a href="impact.html">Impact</a>
-    </div>
-  </nav>
-
+<body class="guarded">
+  <nav class="navbar" id="navbar"></nav>
   <main class="container">
     <div id="toast" class="toast hidden"></div>
-
     <div class="card auth-container">
-      <h1 style="font-size:1.6rem;margin-bottom:.5rem;text-align:center">Welcome Back</h1>
-      <p style="color:var(--gray-600);text-align:center;font-size:.9rem;margin-bottom:1.5rem">
-        Log in to access your donor or receiver dashboard.
-      </p>
-
+      <h1 class="auth-title" id="loginTitle">Welcome back</h1>
+      <p class="auth-subtitle" id="loginSubtitle">Choose how you use FreshLink, then log in.</p>
+      <div class="auth-tabs" id="loginTabs" role="tablist">
+        <button type="button" class="auth-tab active" data-role="donor" role="tab">🥗 I donate food</button>
+        <button type="button" class="auth-tab" data-role="receiver" role="tab">🤝 I receive food</button>
+      </div>
       <form id="loginForm">
-        <div class="form-group" style="margin-bottom:1rem">
-          <label for="loginEmail">Email Address</label>
-          <input type="email" id="loginEmail" placeholder="e.g. hostel.a@college.edu" required />
+        <div class="form-group auth-field">
+          <label for="loginEmail">Email address</label>
+          <input type="email" id="loginEmail" autocomplete="email" required />
         </div>
-
-        <div class="form-group" style="margin-bottom:1.25rem">
+        <div class="form-group auth-field">
           <label for="loginPassword">Password</label>
-          <input type="password" id="loginPassword" placeholder="••••••••" required />
+          <input type="password" id="loginPassword" autocomplete="current-password" required />
         </div>
-
-        <button type="submit" class="btn btn-primary btn-lg" id="loginBtn" style="width:100%">
-          🔑 Sign In
-        </button>
+        <button type="submit" class="btn btn-primary btn-lg auth-submit" id="loginBtn">Log in as donor</button>
       </form>
-
-      <div style="margin-top:1.5rem;text-align:center;font-size:.875rem;color:var(--gray-600);border-top:1px solid var(--gray-100);padding-top:1.25rem">
-        Don't have an account? <a href="signup.html" style="color:var(--green);font-weight:600;text-decoration:none">Sign up here</a>
+      <div class="auth-footer" id="signupHint">
+        New to FreshLink? <a href="signup.html" id="signupLink">Create an account</a>
       </div>
-
-      <div style="margin-top:1rem;background:var(--gray-50);padding:.75rem;border-radius:8px;font-size:.8rem;color:var(--gray-600)">
-        <strong>Quick Demo Logins</strong> (Password: <code>DemoPass123!</code>):<br />
-        • Donor: <code>hostel.a@college.edu</code><br />
-        • Receiver: <code>annapurna@trust.org</code><br />
-        • Admin: <code>admin@freshlink.org</code>
+      <div class="auth-footer auth-admin">
+        <a href="login.html?role=admin" id="adminLink">Admin log in</a>
       </div>
+      <div class="demo-box" id="demoBox"></div>
     </div>
   </main>
-
   <script src="api.js"></script>
+  <script src="nav.js"></script>
   <script>
+    const ROLE_TEXT = {
+      donor: { button: 'Log in as donor', demo: 'hostel.a@college.edu', signup: 'signup.html?role=donor' },
+      receiver: { button: 'Log in as receiver', demo: 'annapurna@trust.org', signup: 'signup.html?role=receiver' },
+      admin: { button: 'Log in as admin', demo: 'admin@freshlink.org', signup: '' },
+    };
     const form = document.getElementById('loginForm');
     const btn = document.getElementById('loginBtn');
-
+    const tabs = document.querySelectorAll('#loginTabs .auth-tab');
+    let selectedRole = 'donor';
+    function selectRole(role) {
+      selectedRole = role;
+      tabs.forEach(t => {
+        const on = t.dataset.role === role;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', on);
+      });
+      btn.textContent = ROLE_TEXT[role].button;
+      document.getElementById('demoBox').innerHTML =
+        `Demo account: <code>${ROLE_TEXT[role].demo}</code><br />Password: <code>DemoPass123!</code>`;
+      if (ROLE_TEXT[role].signup) document.getElementById('signupLink').href = ROLE_TEXT[role].signup;
+    }
+    function enterAdminMode() {
+      document.getElementById('loginTabs').style.display = 'none';
+      document.getElementById('signupHint').style.display = 'none';
+      document.getElementById('loginTitle').textContent = 'Admin log in';
+      document.getElementById('loginSubtitle').textContent = 'For the FreshLink team only.';
+      const link = document.getElementById('adminLink');
+      link.textContent = 'Back to donor and receiver log in';
+      link.href = 'login.html';
+      selectRole('admin');
+    }
+    tabs.forEach(t => t.addEventListener('click', () => selectRole(t.dataset.role)));
+    const param = new URLSearchParams(location.search).get('role');
+    if (param === 'admin') enterAdminMode();
+    else selectRole(param === 'receiver' ? 'receiver' : 'donor');
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const email = document.getElementById('loginEmail').value.trim();
       const password = document.getElementById('loginPassword').value;
-
       btn.disabled = true;
-      btn.textContent = '⏳ Signing in…';
-
+      btn.textContent = 'Logging in…';
       try {
         const res = await apiFetch('/auth/login', {
           method: 'POST',
           body: JSON.stringify({ email, password }),
         });
-
-        showToast('✅ Login successful! Redirecting…');
-        setTimeout(() => {
-          if (res.user.role === 'donor') {
-            window.location.href = 'donor.html';
-          } else if (res.user.role === 'receiver') {
-            window.location.href = 'ngo.html';
-          } else {
-            window.location.href = 'impact.html';
-          }
-        }, 800);
+        const role = res.user.role;
+        if (role !== selectedRole) {
+          await apiFetch('/auth/logout', { method: 'POST' }).catch(() => {});
+          const where = role === 'admin' ? 'the Admin log in link below' : `the "${role === 'donor' ? 'I donate food' : 'I receive food'}" tab`;
+          throw new Error(`This is a ${role} account. Use ${where} instead.`);
+        }
+        location.href = DASHBOARD[role];
       } catch (err) {
         showToast(err.message, 'error');
         btn.disabled = false;
-        btn.textContent = '🔑 Sign In';
+        btn.textContent = ROLE_TEXT[selectedRole].button;
       }
     });
+    initPage({ guestOnly: true });
   </script>
 </body>
 </html>

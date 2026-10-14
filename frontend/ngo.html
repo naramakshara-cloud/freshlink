@@ -6,38 +6,23 @@
   <title>FreshLink – Receiver Dashboard</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
-  <nav class="navbar">
-    <span class="logo">🌿 FreshLink</span>
-    <div class="nav-links">
-      <a href="index.html">Home</a>
-      <a href="donor.html">Post Food</a>
-      <a href="ngo.html" class="active">Receiver Dashboard</a>
-      <a href="impact.html">Impact</a>
-      <a href="login.html">Login</a>
-    </div>
-  </nav>
-
+<body class="guarded">
+  <nav class="navbar" id="navbar"></nav>
   <header class="page-hero ngo-hero">
     <div class="hero-content">
       <h1>Receiver & Shelter Dashboard</h1>
       <p>Surplus food matching for NGOs, community kitchens, shelters, and families.</p>
     </div>
   </header>
-
   <main class="container">
-
     <div id="toast" class="toast hidden"></div>
-
-    <!-- ── Controls bar ──────────────────────────────── -->
     <div class="controls-bar card">
       <div class="control-group">
-        <label for="ngoSelect">Viewing as Receiver:</label>
+        <label for="ngoSelect">Viewing as:</label>
         <select id="ngoSelect">
           <option value="">Loading…</option>
         </select>
       </div>
-
       <div class="control-group">
         <label for="filterBand">Freshness filter:</label>
         <select id="filterBand">
@@ -47,19 +32,15 @@
           <option value="RED">🔴 Red (urgent)</option>
         </select>
       </div>
-
       <div class="control-group">
-        <button class="btn btn-primary" id="matchBtn">⚡ Run Auto-Match</button>
+        <button class="btn btn-primary" id="matchBtn" style="display:none">⚡ Run Auto-Match</button>
         <button class="btn btn-secondary" id="refreshBtn">🔄 Refresh</button>
       </div>
-
       <div class="capacity-badge" id="capacityBadge" style="display:none">
         <span class="cap-label">Capacity left today:</span>
         <span id="capRemaining" class="cap-value">–</span>
       </div>
     </div>
-
-    <!-- ── Legend ─────────────────────────────────────── -->
     <div class="legend">
       <span class="legend-item"><span class="dot green"></span> GREEN ≥70 freshness</span>
       <span class="legend-item"><span class="dot yellow"></span> YELLOW 40–69</span>
@@ -67,22 +48,17 @@
       <span class="legend-separator">|</span>
       <span class="legend-item">⏱ Countdown = time until food expires</span>
     </div>
-
-    <!-- ── Available food cards ───────────────────────── -->
     <h2 class="section-heading">🍱 Nearby Available Food</h2>
     <div id="listingsGrid" class="listing-grid">
-      <div class="empty-state">Select an NGO above to see nearby food</div>
+      <div class="empty-state">⏳ Loading…</div>
     </div>
-
-    <!-- ── My Matches ─────────────────────────────────── -->
     <section id="myMatchesSection" style="display:none">
       <h2 class="section-heading">🤝 My Matches</h2>
       <div id="myMatchesGrid" class="match-cards-grid"></div>
     </section>
-
   </main>
-
   <script src="api.js"></script>
+  <script src="nav.js"></script>
   <script src="ngo.js"></script>
 </body>
 </html>
