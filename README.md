@@ -1,236 +1,254 @@
-FreshLink 
+# FreshLink
 
-**FreshLink** is a hyperlocal surplus food redistribution system connecting donors (college hostels, canteens, households, restaurants) with verified receivers (NGOs, community kitchens, animal shelters, and individuals/families in need) in real time.
+FreshLink is a hyperlocal food surplus redistribution system built for the BACSE202 Database Systems course. Hostel messes, canteens, restaurants and households post leftover food, and the system matches each item to a nearby receiver: an NGO, orphanage, old age home, community kitchen, family or animal shelter. The scoring and matching logic is written in SQL and runs inside PostgreSQL with PostGIS. The backend is FastAPI and the frontend is plain HTML, CSS and JavaScript.
 
-Unlike simple first-come-first-served lists, FreshLink combines:
-- **Mathematical freshness decay** (half-life curves per food category)
-- **Hard food-safety caps** (`effective_expiry`)
-- **PostGIS spatial proximity** (WGS 84 spherical distance)
-- **Multi-tiered recipient rules** (human priority, animal shelter diet guards, verification tiers)
+## How it works
 
----
+1. A donor posts surplus food with its category, quantity, preparation time and expiry time.
+2. The database caps the expiry at the category's food-safety limit, calculates freshness, urgency and priority, and tries to match the food straight away.
+3. The best eligible receiver is offered the food. Only one receiver holds an offer at a time.
+4. The receiver accepts or rejects. A rejected offer, or one left unanswered for 15 minutes, goes to the next eligible receiver. A receiver is never offered the same item twice.
+5. At pickup, the receiver enters a 4-digit code that only the donor can see. This confirms the handover.
+6. The receiver marks the food as delivered, and it counts towards the impact figures.
 
-## 🌟 Architecture & Key Features
+A background job runs every minute. It expires food that is past its safe time, cancels offers that have timed out, and matches anything still waiting.
 
-### 1. Multi-User Hierarchy & Roles
-- **Users (`users`)**: Authenticated profiles with roles `donor`, `receiver`, or `admin`.
-- **Donors (`donors`)**: Linked to user accounts. Categorized into `hostel`, `canteen`, `household`, `restaurant`, `event`, and `other`.
-- **Receivers (`receivers`)**: Renamed from NGOs to accommodate diverse needs:
-  - `individual_or_family` (default daily capacity: 5 kg)
-  - `ngo`, `community_kitchen`, `orphanage`, `old_age_home` (default daily capacity: 50 kg)
-  - `animal_shelter` (strictly matched only with food marked `suitable_for_animals = TRUE`)
-  - **Verification Gates**: Receivers must have `verification_status = 'approved'` and `is_active = TRUE` to receive surplus food.
+## Scoring
 
-### 2. Comprehensive Food Listings
-Surplus listings track crucial safety and logistical metadata:
-- Quantity (kg) & estimated servings.
-- Dietary flags: `is_veg` (Boolean) and `allergens` (text notes).
-- Animal safety flag: `suitable_for_animals` (Boolean).
-- Logistics: `pickup_instructions`, `pickup_code` (random 4-digit verification code), and pickup time window.
-- Hard safety constraint: Donor-declared expiration is capped by `category.max_safe_hours` using database triggers.
+All scores range from 0 to 100.
 
-### 3. Expiry-Aware Scoring & Matching Algorithm
+**Safe shelf life.** The time from preparation to whichever comes first: the donor's expiry time, or the preparation time plus the category's safety limit. A donor cannot list cooked rice as good for two days.
 
-#### Freshness Score
-$$S_{\text{freshness}} = 100 \cdot e^{-k \cdot \Delta t_{\text{prepared}}}$$
-Clamped to $[0, 100]$, where $k$ is the category's decay rate constant (e.g. $0.15$ for cooked curries, $0.005$ for sealed biscuits).
+**Freshness** is the share of the safe shelf life that is left:
 
-#### Urgency Score
-$$S_{\text{urgency}} = 100 - \left( \Delta t_{\text{effective\_expiry}} \cdot \frac{100}{24} \right)$$
-Clamped to $[0, 100]$ across a 24-hour window. Expired or unsafe food is never matched.
+```
+freshness = remaining safe shelf life / total safe shelf life * 100
+```
 
-#### Proximity Score
-$$S_{\text{proximity}} = 100 \cdot \left(1 - \frac{\text{distance}}{\text{receiver radius}}\right)$$
-Calculated via PostGIS `ST_Distance` on WGS 84 points (`SRID 4326`).
+**Urgency** is based on the actual hours left, over a 24-hour window:
 
-#### Priority Score
-$$\text{Priority} = 0.5 \cdot S_{\text{urgency}} + 0.3 \cdot S_{\text{freshness}} + 0.2 \cdot S_{\text{proximity}}$$
+```
+urgency = 100 * (1 - hours_left / 24)        clamped to 0..100
+```
 
-#### Scheduler Matching Rules (`match_food_to_receivers()`)
-1. **Concurrency Protection**: Uses `pg_advisory_xact_lock` to prevent race conditions during parallel scheduler runs.
-2. **Processing Order**: Soonest `effective_expiry` first, then highest freshness.
-3. **Safety & Verification**: Food past its safe consumption limit is skipped. Receivers must be `approved` and active.
-4. **Human Priority**: Human receivers receive precedence over animal shelters.
-5. **Animal Shelter Guard**: Animal shelters are strictly matched only with food flagged `suitable_for_animals = TRUE`.
-6. **Capacity & Refrigeration**: Verifies remaining daily capacity and refrigeration capability before assignment.
+**Priority** decides which food is matched first:
 
----
+```
+priority = 0.6 * urgency + 0.4 * (100 - freshness)
+```
 
-### 4. Secure Authentication & Role-Based Access Control (RBAC)
-- **Password Security**: Passwords are never stored in plaintext. They are salted and hashed using **bcrypt** (cost factor: 12).
-- **Session Tokens**: Handled via signed **JWT tokens** delivered in an **HttpOnly cookie** (`access_token`) with `SameSite=Lax` protection against cross-site request forgery (CSRF) and XSS token harvesting.
-- **Strict Endpoint Permissions**:
-  - **Donors**: Can only create listings under their own verified donor profile and review their own active surplus posts.
-  - **Receivers**: Can only view surplus listings located within their service radius and accept/reject their assigned matches.
-  - **Admins**: Exclusively authorized to inspect the full user list (`/users`), approve/reject receiver applications, manually trigger auto-matching runs, execute database resets, and trigger housekeeping cleanup.
-  - **Confidential Verification Codes**: The 4-digit `pickup_code` is returned only to the donor who created the listing and is strictly hidden from receivers. To prevent unauthorized pickups, the receiver must obtain the code in person and submit it during the pickup confirmation step.
+Freshness alone ranks foods badly when their shelf lives differ. At 4 PM, rice cooked at 10 AM that expires at 6 PM and a packet of biscuits with 42 hours left can both be at 25% freshness. Urgency separates them: the rice scores priority 85 and the biscuits 30. Urgency gets the larger weight because food that expires is lost completely.
 
----
+**Proximity** is used only to choose between receivers, never to rank food:
 
-## 🛠 Tech Stack
+```
+proximity = 100 * (1 - distance / receiver's pickup range)
+```
 
-- **Database**: PostgreSQL 14+ with **PostGIS 3+** extension
-  - Multi-user relational schema without destructive drop commands.
-  - Safe migration history in `database/migrations/`.
-  - Stored procedures, triggers, GIST spatial indexes, and real-time analytical views.
-- **Backend**: **FastAPI** (Python 3.10+) with **Uvicorn**
-  - Database connectivity with `psycopg2-binary`.
-  - Secure credential isolation via `python-dotenv`.
-  - Authentication via `bcrypt` and `pyjwt` (HS256).
-- **Frontend**: Clean, responsive **HTML5**, **CSS3**, and vanilla **JavaScript (ES6+)**
-  - Donor submission portal with dietary, allergen, and animal suitability controls.
-  - Receiver dashboard with 🟢🟡🔴 freshness bands, live countdowns, pickup code verification prompt on pickup handoff, and match lifecycle buttons (`Accept`, `Reject`, `Mark Picked Up`, `Mark Delivered`).
-  - Impact dashboard with real-time KPI metrics and demo reset controls.
+Keeping distance out of the priority means a nearby but less urgent item cannot be handled before food that is about to spoil.
 
----
+Freshness bands on the dashboards are green (70 and above), yellow (40 to 69) and red (below 40). Food below freshness 20 is not matched.
 
-## 📁 Repository Structure
+In SQL the freshness function is written as `100 * (1 - (e / T)^k)`, where `e` is the hours since preparation and `T` is the safe shelf life. With `k = 1` this is the formula above. Every category uses `k = 1`. The value is kept in the `spoilage_shape` column so a curved decay can be tested later without code changes.
+
+## Matching rules
+
+`match_food_to_receivers()` goes through available food in order of priority, highest first. For each item it picks one receiver that:
+
+- is approved by an admin and active
+- is within its own pickup range of the food
+- has enough daily capacity left (pending offers count towards it)
+- has a fridge, if the food category needs one
+- still needs that category today, if it has set food requirements
+- has not already rejected the item or let an offer for it time out
+
+Human receivers are always chosen before animal shelters, and animal shelters only receive food the donor marked as safe for animals. Among the remaining receivers, the one with the highest proximity score wins. An advisory lock stops two matching runs from overlapping.
+
+## Roles
+
+**Donors** post food and see their own listings, who each item was matched to, and the pickup code until the food is collected.
+
+**Receivers** see food within their pickup range, accept or reject offers, confirm pickup with the donor's code, and mark food as delivered. They set their pickup range at signup (2 km by default for individuals and families, 5 km for organisations) and can change it on the dashboard, between 0.5 and 20 km. New receivers start as pending and cannot receive food until an admin approves them.
+
+**Admins** approve or reject receivers, manage food categories, can view any receiver's dashboard, and can run matching, expire old listings or reset the demo data.
+
+Each role only sees its own pages. Opening another role's page redirects to the user's own dashboard, and logged-out users are sent to the login page.
+
+## Database
+
+| Project entity | Table |
+|---|---|
+| Food provider | `donors`, linked to `users` |
+| Food donation | `food_listings` |
+| NGO / receiver | `receivers` |
+| NGO requirement | `receiver_requirements` |
+| Food match | `matches`, with every status change logged in `match_history` |
+| Pickup schedule | `pickup_schedules` |
+
+`food_categories` holds the food types. Each has a safety limit in hours, a fridge flag, example foods shown to donors, and an active flag. Categories are hidden rather than deleted, because older listings still refer to them.
+
+Default categories:
+
+| Category | Safety limit | Needs fridge |
+|---|---|---|
+| Cooked Rice & Curries | 6 hours | No |
+| Dairy & Sweets | 8 hours | Yes |
+| Breads & Rotis | 12 hours | No |
+| Fresh Fruits & Veg | 48 hours | No |
+| Packaged / Dry Food | 7 days | No |
+
+Main SQL objects:
+
+- Functions: `freshness_score`, `urgency_score`, `food_priority`, `proximity_score`, `requirement_room_kg`, `nearby_listings_for_receiver`, `match_food_to_receivers`, `expire_stale_listings`
+- Triggers: setting the safe expiry and pickup code on new listings, keeping listing status and `match_history` in step with matches, and validating pickup schedules
+- Views: `v_available_listings`, `v_receiver_capacity_today`, `v_impact_summary`
+- Constraints: one active match per listing (partial unique index), and unique category names ignoring case
+- GiST spatial indexes on donor, receiver and listing locations
+
+A pickup time has to be before the food's safe expiry and can only be set for a pending or accepted match. Rejecting a match cancels its schedule, picking the food up completes it, and a schedule more than two hours overdue is marked as missed.
+
+## Tech stack
+
+- PostgreSQL 14 or later with PostGIS 3 or later
+- Python 3.10 or later, FastAPI and Uvicorn, psycopg2
+- bcrypt for password hashing, PyJWT for login tokens stored in an HttpOnly cookie
+- HTML, CSS and JavaScript with no framework, plus Leaflet and OpenStreetMap for choosing a location at signup
+
+## Project structure
 
 ```
 freshlink/
-├── .env.example                     <- Template for database credentials & JWT secret
-├── .gitignore                       <- Ignores .env and __pycache__
-├── README.md                        <- Project overview and guide
-├── backend/
-│   ├── main.py                      <- FastAPI API server with auth & RBAC
-│   ├── create_admin.py              <- CLI utility to create admin accounts
-│   ├── test_auth_security.py        <- Automated security & permission test suite
-│   └── requirements.txt             <- Python dependencies
-├── database/
-│   ├── schema.sql                   <- Safe multi-user schema (no drop statements)
-│   ├── seed.sql                     <- Canonical reference data (food categories)
-│   ├── demo_seed.sql                <- Demo login accounts, donors, receivers & listings
-│   └── migrations/
-│       └── 001_initial_schema.sql   <- Versioned initial migration script
-└── frontend/
-    ├── api.js                       <- Shared API fetch client (credentials: include)
-    ├── donor.html / donor.js        <- Donor listing portal
-    ├── ngo.html / ngo.js            <- Receiver / Shelter dashboard
-    ├── impact.html / impact.js      <- Metrics & impact analytics
-    └── style.css                    <- Global styling and color bands
+  .env.example            database and JWT settings template
+  .gitignore
+  README.md
+  backend/
+    main.py               API, login, permissions, background matching job
+    create_admin.py       command-line tool to create an admin account
+    test_auth_security.py permission and pickup code tests
+    requirements.txt
+  database/
+    schema.sql            tables, functions, triggers and views
+    seed.sql              default food categories
+    demo_seed.sql         demo accounts and sample listings
+    README.md             notes on the database design
+  frontend/
+    index.html            home page
+    login.html            login with donor and receiver tabs
+    signup.html           registration with a map to pick a location
+    donor.html, donor.js  donor dashboard
+    ngo.html, ngo.js      receiver dashboard
+    admin.html, admin.js  receiver approvals and food categories
+    impact.html, impact.js
+    api.js                shared API calls and helpers
+    nav.js                menu and page protection by role
+    style.css
 ```
 
----
+## Setup
 
-## 🚀 Setup & Installation
+You need PostgreSQL with PostGIS, Python 3.10 or later, and Git.
 
-### Prerequisites
-- [PostgreSQL](https://www.postgresql.org/download/) installed with the **PostGIS** extension.
-- [Python 3.10+](https://www.python.org/) installed.
-- Git.
+1. Clone the repository.
 
-### Step 1: Clone Repository
-```bash
-git clone https://github.com/naramakshara-cloud/freshlink.git
-cd freshlink
+   ```
+   git clone https://github.com/naramakshara-cloud/freshlink.git
+   cd freshlink
+   ```
+
+2. Copy `.env.example` to `.env` and fill in your PostgreSQL password and a long random JWT secret.
+
+   ```
+   copy .env.example .env
+   ```
+
+   On macOS or Linux use `cp` instead of `copy`. Never commit `.env`; it is already in `.gitignore`.
+
+3. Create the database and load the schema, the categories and the demo data.
+
+   ```
+   createdb -U postgres freshlink
+   psql -U postgres -d freshlink -f database/schema.sql
+   psql -U postgres -d freshlink -f database/seed.sql
+   psql -U postgres -d freshlink -f database/demo_seed.sql
+   ```
+
+4. Install the Python packages.
+
+   ```
+   pip install -r backend/requirements.txt
+   ```
+
+### Updating an existing database
+
+`schema.sql` and `seed.sql` can be run again on an existing database. They add anything new and do not delete data. `demo_seed.sql` is different: it deletes all users, listings and matches and reloads the demo accounts, so only run it when you want to start over.
+
+## Running
+
+Start the backend from the `backend` folder:
+
 ```
-
-### Step 2: Configure Environment Variables
-Copy the template configuration file:
-
-```bash
-# Windows PowerShell
-Copy-Item .env.example .env
-
-# Linux / macOS
-cp .env.example .env
-```
-
-Edit `.env` with your PostgreSQL superuser password and a secret JWT key:
-```env
-DB_NAME=freshlink
-DB_USER=postgres
-DB_PASSWORD=your_actual_password_here
-DB_HOST=localhost
-DB_PORT=5432
-JWT_SECRET=your_secure_jwt_secret_key_here
-```
-
-### Step 3: Initialize Database
-Create the database and run the schema and seed scripts:
-
-```bash
-# Create the freshlink database
-createdb -U postgres freshlink
-
-# 1. Apply multi-user schema
-psql -U postgres -d freshlink -f database/schema.sql
-
-# 2. Load permanent categories
-psql -U postgres -d freshlink -f database/seed.sql
-
-# 3. Load demo accounts and sample listings
-psql -U postgres -d freshlink -f database/demo_seed.sql
-```
-
-*(Note: Future database updates should be added as incremental scripts in `database/migrations/`).*
-
-### Step 4: Install Dependencies
-```bash
-pip install -r backend/requirements.txt
-```
-
----
-
-## 🏃 Running the Application
-
-### 1. Launch the Backend Server
-From the repository root:
-```bash
-python -m uvicorn backend.main:app --reload --port 8000
-```
-Or from the `backend/` directory:
-```bash
 cd backend
 python -m uvicorn main:app --reload --port 8000
 ```
 
-- Interactive Swagger Documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
-- Interactive ReDoc: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+Then open http://localhost:8000 in a browser. The backend serves the website as well as the API. Do not open the HTML files directly from the folder: login uses a cookie, which only works when the pages come from the same address as the API.
 
-### 2. Creating an Administrator Account (CLI)
-You can create a new administrator account or elevate an existing user at any time using the bundled CLI tool:
+The API documentation is at http://localhost:8000/docs.
 
-```bash
-# Interactive mode
-python backend/create_admin.py
+If port 8000 is already in use, an older copy of the backend is probably still running. Stop it, or find it with `netstat -ano | findstr :8000` and end it with `taskkill /PID <number> /F`.
 
-# Or pass arguments directly
-python backend/create_admin.py --email admin@example.com --password "MySecretPass123!" --name "Alice Admin" --phone "9876543210"
+## Demo accounts
+
+Every demo account uses the password `DemoPass123!`.
+
+| Role | Email | Name | Notes |
+|---|---|---|---|
+| Admin | admin@freshlink.org | System Administrator | |
+| Donor | hostel.a@college.edu | Boys Hostel Block A Mess | |
+| Donor | canteen@college.edu | Central Canteen | |
+| Donor | sharma.home@gmail.com | Sharma Household | |
+| Donor | hostel.d@college.edu | Girls Hostel Mess | |
+| Receiver | annapurna@trust.org | Annapurna Food Bank | NGO, 80 kg a day, has a fridge |
+| Receiver | shelter@hope.org | Hope Shelter | Orphanage, 30 kg a day, needs only cooked food and breads |
+| Receiver | jayanagar@kitchen.org | Jayanagar Community Kitchen | 40 kg a day |
+| Receiver | paws@animalshelter.org | Paws Animal Rescue | Animal shelter, animal-safe food only |
+| Receiver | kumar.family@gmail.com | Kumar Family | Family, 5 kg a day, 2 km range |
+
+All demo locations are in central Bengaluru. Use the matching login tab: donors on "I donate food", receivers on "I receive food", and the admin through the "Admin log in" link.
+
+To create another admin account:
+
+```
+python backend/create_admin.py --email you@example.com --password "ChooseAStrongPassword" --name "Your Name" --phone "9876543210"
 ```
 
-### 3. Demo User Accounts (from `demo_seed.sql`)
-All demo accounts are pre-configured with real bcrypt password hashes.
-**Default Password for all demo accounts**: `DemoPass123!`
+Run it without arguments to be asked for each value.
 
-| Role | Email | Name / Organisation | Description |
-|---|---|---|---|
-| **Admin** | `admin@freshlink.org` | System Administrator | System-wide admin access, user audits, approvals |
-| **Donor** | `hostel.a@college.edu` | Boys Hostel Block A Mess | Hostel mess food donor |
-| **Donor** | `canteen@college.edu` | Central Canteen | Campus canteen food donor |
-| **Donor** | `sharma.home@gmail.com` | Sharma Household | Home surplus food donor |
-| **Donor** | `hostel.d@college.edu` | Girls Hostel Mess | Campus hostel mess food donor |
-| **Receiver** | `annapurna@trust.org` | Annapurna Food Bank | Large NGO (80 kg cap, refrigerated) |
-| **Receiver** | `shelter@hope.org` | Hope Shelter | Orphanage (30 kg cap) |
-| **Receiver** | `jayanagar@kitchen.org` | Community Kitchen | Community kitchen (40 kg cap) |
-| **Receiver** | `paws@animalshelter.org` | Paws Animal Rescue | Animal shelter (animal-safe food only) |
-| **Receiver** | `kumar.family@gmail.com` | Kumar Family | Individual/Family (5 kg default capacity) |
+## Tests
 
-### 4. Running the Security Test Suite
-You can test the entire authentication and permission model at any time:
-```bash
+With the backend running, from the project root:
+
+```
 python backend/test_auth_security.py
 ```
-This script validates:
-- Rejection (401) of unauthenticated requests on protected endpoints.
-- Exclusion of `password_hash` from `/users` results.
-- Role-based barriers (403) for donors and receivers trying to access restricted admin actions.
-- Privacy of `pickup_code` (visible only to the food creator; hidden from receivers).
-- Rejection of incorrect pickup codes during receiver collection handoffs.
-- Successful cookie-based logout.
 
-### 5. Open the Web Frontend
-Open the static web pages in your browser:
-- **Donor Portal**: Open `frontend/donor.html`
-- **Receiver Dashboard**: Open `frontend/ngo.html`
-- **Impact & Metrics**: Open `frontend/impact.html`
+The script checks that protected endpoints reject requests without a login, that donors and receivers cannot use admin endpoints, that password hashes are never returned, that the pickup code is only visible to the donor, and that a wrong pickup code is refused. It connects to a database named `freshlink`.
+
+## Settings
+
+These values are at the top of `backend/main.py`:
+
+| Setting | Value | Meaning |
+|---|---|---|
+| `MATCH_INTERVAL_SECONDS` | 60 | How often the background job runs |
+| `PENDING_TIMEOUT_MINUTES` | 15 | How long a receiver has to accept an offer |
+| `MIN_RADIUS_KM`, `MAX_RADIUS_KM` | 0.5, 20 | Allowed pickup range |
+
+## Limitations and future work
+
+- Freshness is estimated from time only. Storage temperature, which affects real spoilage, is not recorded.
+- The priority weights (0.6 and 0.4) and the 24-hour urgency window are design choices and have not been tuned with real data.
+- Receivers cannot yet set their food requirements from the website; this is currently done in the database.
+- The pickup schedule rules exist in the database, but the website does not yet let donors and receivers agree on a pickup time.
+- Matching is greedy, so the closest eligible receiver can receive most of the food until its capacity is used up.
+- Before any public deployment, remove the demo accounts, set a strong `JWT_SECRET`, remove the fallback secret in `main.py` and serve the site over HTTPS.
