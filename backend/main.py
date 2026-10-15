@@ -21,7 +21,8 @@ load_dotenv()
 JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-freshlink-jwt-key-2026")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 24
-MATCH_INTERVAL_SECONDS = 300
+MATCH_INTERVAL_SECONDS = 60
+PENDING_TIMEOUT_MINUTES = 15
 DB_CONFIG = {
     "dbname":   os.getenv("DB_NAME",     "freshlink"),
     "user":     os.getenv("DB_USER",     "postgres"),
@@ -53,7 +54,7 @@ def run_auto_match() -> int:
         return 0
 def run_housekeeping_and_matching():
     try:
-        query("SELECT * FROM expire_stale_listings()")
+        query("SELECT * FROM expire_stale_listings(%s)", (PENDING_TIMEOUT_MINUTES,))
     except Exception as e:
         print(f"[auto-match] housekeeping failed: {e}")
     created = run_auto_match()
@@ -716,7 +717,7 @@ def impact_summary():
     }
 @app.post("/housekeeping/expire")
 def expire_stale(current_user: dict = Depends(require_role(["admin"]))):
-    row = query("SELECT * FROM expire_stale_listings()", fetch="one")
+    row = query("SELECT * FROM expire_stale_listings(%s)", (PENDING_TIMEOUT_MINUTES,), fetch="one")
     return dict(row)
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
