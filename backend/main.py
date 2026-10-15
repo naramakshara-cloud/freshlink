@@ -119,13 +119,14 @@ async def get_current_user(request: Request) -> dict:
     if not user["is_active"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is deactivated.")
     donor = query("SELECT donor_id, name FROM donors WHERE user_id = %s", (user_id,), fetch="one")
-    receiver = query("SELECT receiver_id, name, verification_status FROM receivers WHERE user_id = %s", (user_id,), fetch="one")
+    receiver = query("SELECT receiver_id, name, verification_status, service_radius_km FROM receivers WHERE user_id = %s", (user_id,), fetch="one")
     user_dict = dict(user)
     user_dict["donor_id"] = donor["donor_id"] if donor else None
     user_dict["receiver_id"] = receiver["receiver_id"] if receiver else None
     user_dict["verification_status"] = receiver["verification_status"] if receiver else None
     user_dict["donor_name"] = donor["name"] if donor else None
     user_dict["receiver_name"] = receiver["name"] if receiver else None
+    user_dict["service_radius_km"] = float(receiver["service_radius_km"]) if receiver else None
     return user_dict
 def require_role(allowed_roles: List[str]):
     def role_checker(current_user: dict = Depends(get_current_user)) -> dict:
@@ -150,6 +151,7 @@ class UserSignup(BaseModel):
     daily_capacity_kg:     Optional[float] = None
     feed_count:            Optional[int] = None
     has_refrigeration:     Optional[bool] = False
+    service_radius_km:     Optional[float] = None
 class UserLogin(BaseModel):
     email:    str
     password: str
@@ -168,6 +170,13 @@ class ListingCreate(BaseModel):
 class MatchAction(BaseModel):
     action:      str
     pickup_code: Optional[str] = None
+class ReceiverSettings(BaseModel):
+    service_radius_km: float
+MIN_RADIUS_KM = 0.5
+MAX_RADIUS_KM = 20
+def check_radius(km):
+    if km is None or not (MIN_RADIUS_KM <= km <= MAX_RADIUS_KM):
+        raise HTTPException(status_code=400, detail=f"Pickup range must be between {MIN_RADIUS_KM} and {MAX_RADIUS_KM} km.")
 class CategoryCreate(BaseModel):
     name:                   str
     description:            Optional[str] = None
@@ -194,6 +203,8 @@ def signup(data: UserSignup, response: Response):
         raise HTTPException(status_code=400, detail="Signup role must be 'donor' or 'receiver'. Admin accounts must be created by CLI.")
     if len(data.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    if data.role == "receiver" and data.service_radius_km is not None:
+        check_radius(data.service_radius_km)
     existing = query("SELECT user_id FROM users WHERE email = %s", (data.email.strip().lower(),), fetch="one")
     if existing:
         raise HTTPException(status_code=400, detail="Email is already registered.")
@@ -226,12 +237,15 @@ def signup(data: UserSignup, response: Response):
         cap = data.daily_capacity_kg
         if cap is None:
             cap = 5.0 if rtype == "individual_or_family" else 50.0
+        radius = data.service_radius_km
+        if radius is None:
+            radius = 2.0 if rtype == "individual_or_family" else 5.0
         query(
             """
             INSERT INTO receivers (user_id, name, receiver_type, verification_status, contact_phone, email, address, location, service_radius_km, daily_capacity_kg, has_refrigeration, is_active)
-            VALUES (%s, %s, %s, 'pending', %s, %s, %s, ST_MakePoint(%s, %s)::geography, 5.0, %s, %s, TRUE)
+            VALUES (%s, %s, %s, 'pending', %s, %s, %s, ST_MakePoint(%s, %s)::geography, %s, %s, %s, TRUE)
             """,
-            (user_id, data.full_name.strip(), rtype, data.phone.strip(), data.email.strip().lower(), addr, lng, lat, cap, bool(data.has_refrigeration)),
+            (user_id, data.full_name.strip(), rtype, data.phone.strip(), data.email.strip().lower(), addr, lng, lat, radius, cap, bool(data.has_refrigeration)),
             fetch=None
         )
     token = create_access_token({"sub": str(new_user["user_id"]), "role": new_user["role"], "email": new_user["email"]})
@@ -459,6 +473,18 @@ def list_receivers(current_user: dict = Depends(require_role(["admin"]))):
         """
     )
     return [dict(r) for r in rows]
+@app.patch("/receivers/me/settings")
+def update_my_receiver_settings(body: ReceiverSettings, current_user: dict = Depends(require_role(["receiver"]))):
+    check_radius(body.service_radius_km)
+    if not current_user.get("receiver_id"):
+        raise HTTPException(status_code=400, detail="No receiver profile linked to this account.")
+    query(
+        "UPDATE receivers SET service_radius_km = %s WHERE receiver_id = %s",
+        (round(body.service_radius_km, 2), current_user["receiver_id"]),
+        fetch=None,
+    )
+    run_auto_match()
+    return {"service_radius_km": round(body.service_radius_km, 2), "message": "Pickup range updated"}
 @app.get("/receivers/capacity")
 def receiver_capacity(current_user: dict = Depends(get_current_user)):
     rows = query(

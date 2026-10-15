@@ -14,12 +14,13 @@ function actionButtons(r) {
 function render(receivers) {
   const pending = receivers.filter(r => r.verification_status === 'pending');
   pendingBody.innerHTML = pending.length === 0
-    ? '<tr><td colspan="6" class="loading-row">No one is waiting. New receivers will appear here after they sign up.</td></tr>'
+    ? '<tr><td colspan="7" class="loading-row">No one is waiting. New receivers will appear here after they sign up.</td></tr>'
     : pending.map(r => `
       <tr>
         <td><strong>${escapeHTML(r.name)}</strong></td>
         <td>${typeLabel(r.receiver_type)}</td>
         <td>${escapeHTML(r.address)}</td>
+        <td>${parseFloat(r.service_radius_km)} km</td>
         <td>${r.daily_capacity_kg} kg</td>
         <td>${r.has_refrigeration ? 'Yes' : 'No'}</td>
         <td>${actionButtons(r)}</td>
@@ -29,6 +30,7 @@ function render(receivers) {
       <td>${escapeHTML(r.name)}</td>
       <td>${typeLabel(r.receiver_type)}</td>
       <td><span class="status-pill status-${STATUS_PILL[r.verification_status] || 'cancelled'}">${escapeHTML(r.verification_status)}</span></td>
+      <td>${parseFloat(r.service_radius_km)} km</td>
       <td>${r.daily_capacity_kg} kg</td>
       <td>${r.has_refrigeration ? 'Yes' : 'No'}</td>
       <td>${actionButtons(r)}</td>
@@ -76,7 +78,7 @@ function renderCategories() {
       <td><strong>${escapeHTML(c.name)}</strong></td>
       <td class="cell-wrap">${escapeHTML(c.description || '—')}</td>
       <td>${formatHours(c.max_safe_hours)}</td>
-      <td>${c.requires_refrigeration ? '❄️ Yes' : 'No'}</td>
+      <td>${c.requires_refrigeration ? 'Yes' : 'No'}</td>
       <td><span class="status-pill status-${c.is_active ? 'accepted' : 'cancelled'}">${c.is_active ? 'Shown' : 'Hidden'}</span></td>
       <td>${c.listing_count}</td>
       <td>

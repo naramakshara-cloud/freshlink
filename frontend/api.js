@@ -21,6 +21,7 @@ const createListing = (data) => apiFetch('/listings', { method: 'POST', body: JS
 const getNGOs          = ()       => apiFetch('/receivers');
 const getNearbyListings= (ngoId)  => apiFetch(`/receivers/${ngoId}/listings`);
 const getNGOCapacity   = ()       => apiFetch('/receivers/capacity');
+const updateMyRange = (km) => apiFetch('/receivers/me/settings', { method: 'PATCH', body: JSON.stringify({ service_radius_km: km }) });
 const setReceiverStatus = (id, status) => apiFetch(`/receivers/${id}/approval`, { method: 'PATCH', body: JSON.stringify({ verification_status: status }) });
 const runMatcher    = ()          => apiFetch('/matches/run', { method: 'POST' });
 const getMatches    = ()          => apiFetch('/matches');

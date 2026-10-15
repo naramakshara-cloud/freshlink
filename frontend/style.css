@@ -650,3 +650,5 @@ button.auth-tab {
 .row-muted td { color: var(--gray-400); }
 .cell-wrap { max-width: 320px; white-space: normal; line-height: 1.4; }
 [hidden] { display: none !important; }
+.range-input { width: 5.5rem; }
+.range-unit { color: var(--gray-600); font-size: .9rem; }

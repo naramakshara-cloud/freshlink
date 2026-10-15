@@ -230,6 +230,38 @@ matchBtn.addEventListener('click', async () => {
     matchBtn.textContent = '⚡ Run Auto-Match';
   }
 });
+const rangeGroup = document.getElementById('rangeGroup');
+const rangeInput = document.getElementById('rangeInput');
+const rangeSaveBtn = document.getElementById('rangeSaveBtn');
+function setupRange() {
+  rangeInput.value = currentUser.service_radius_km ?? 5;
+  rangeGroup.hidden = false;
+  rangeSaveBtn.addEventListener('click', saveRange);
+  rangeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveRange(); });
+}
+async function saveRange() {
+  const km = parseFloat(rangeInput.value);
+  if (isNaN(km) || km < 0.5 || km > 20) {
+    showToast('Pickup range must be between 0.5 and 20 km.', 'error');
+    return;
+  }
+  if (km === currentUser.service_radius_km) {
+    showToast(`Your pickup range is already ${km} km`);
+    return;
+  }
+  rangeSaveBtn.disabled = true;
+  try {
+    const res = await updateMyRange(km);
+    currentUser.service_radius_km = res.service_radius_km;
+    rangeInput.value = res.service_radius_km;
+    showToast(`📍 Pickup range set to ${res.service_radius_km} km`);
+    if (currentUser.verification_status === 'approved') await loadAll();
+  } catch (e) {
+    showToast(e.message, 'error');
+  } finally {
+    rangeSaveBtn.disabled = false;
+  }
+}
 async function start() {
   const session = await initPage({ roles: ['receiver', 'admin'] });
   if (session.redirected) return;
@@ -255,6 +287,7 @@ async function start() {
   }
   ngoSelect.innerHTML = `<option value="${currentUser.receiver_id}">${escapeHTML(currentUser.receiver_name || currentUser.full_name)}</option>`;
   ngoSelect.disabled = true;
+  setupRange();
   if (currentUser.verification_status !== 'approved') {
     listingsGrid.innerHTML = '<div class="empty-state">⏳ Your account is waiting for admin approval. Nearby food will appear here once you are approved.</div>';
     return;

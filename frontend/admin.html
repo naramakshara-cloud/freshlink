@@ -17,22 +17,22 @@
   <main class="container">
     <div id="toast" class="toast hidden"></div>
     <section class="card">
-      <h2 class="card-title">⏳ Waiting for approval</h2>
+      <h2 class="card-title">Waiting for approval</h2>
       <div class="table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>Name</th><th>Type</th><th>Address</th><th>Capacity</th><th>Fridge</th><th></th></tr>
+            <tr><th>Name</th><th>Type</th><th>Address</th><th>Range</th><th>Capacity</th><th>Fridge</th><th></th></tr>
           </thead>
-          <tbody id="pendingBody"><tr><td colspan="6" class="loading-row">Loading…</td></tr></tbody>
+          <tbody id="pendingBody"><tr><td colspan="7" class="loading-row">Loading…</td></tr></tbody>
         </table>
       </div>
     </section>
     <section class="card" id="categoriesCard">
       <div class="section-head">
-        <h2 class="card-title">🍽️ Food types</h2>
+        <h2 class="card-title">Food types</h2>
         <button type="button" class="btn btn-primary" id="addCategoryBtn">Add food type</button>
       </div>
-      <p class="card-note">Donors pick one of these when they post food. Changes to safe hours apply to food posted after the change.</p>
+      <p class="card-note"></p>
       <form id="categoryForm" class="category-form" hidden>
         <h3 class="category-form-title" id="categoryFormTitle">Add food type</h3>
         <div class="form-grid">
@@ -71,13 +71,13 @@
       </div>
     </section>
     <section class="card">
-      <h2 class="card-title">🤝 All receivers</h2>
+      <h2 class="card-title">All receivers</h2>
       <div class="table-wrap">
         <table class="data-table">
           <thead>
-            <tr><th>Name</th><th>Type</th><th>Status</th><th>Capacity</th><th>Fridge</th><th></th></tr>
+            <tr><th>Name</th><th>Type</th><th>Status</th><th>Range</th><th>Capacity</th><th>Fridge</th><th></th></tr>
           </thead>
-          <tbody id="allBody"><tr><td colspan="6" class="loading-row">Loading…</td></tr></tbody>
+          <tbody id="allBody"><tr><td colspan="7" class="loading-row">Loading…</td></tr></tbody>
         </table>
       </div>
     </section>

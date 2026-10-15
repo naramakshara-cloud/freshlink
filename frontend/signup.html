@@ -18,10 +18,10 @@
       </p>
       <div class="auth-tabs">
         <div class="auth-tab active" id="tabDonor" onclick="selectRole('donor')">
-          🥗 I Want to Donate Food
+          DONOR 
         </div>
         <div class="auth-tab" id="tabReceiver" onclick="selectRole('receiver')">
-          🤝 I Need Food (Receiver)
+          RECEIVER 
         </div>
       </div>
       <form id="signupForm">
@@ -78,12 +78,17 @@
               <label for="dailyCap">Daily Capacity (kg)</label>
               <input type="number" id="dailyCap" step="0.5" placeholder="Default: 5kg family / 50kg org" />
             </div>
-            <div class="form-group full-width">
+            <div class="form-group">
               <label for="hasFridge">Cold Storage / Refrigeration?</label>
               <select id="hasFridge">
                 <option value="false">No Refrigeration</option>
                 <option value="true">Yes, Refrigerator / Chiller Available</option>
               </select>
+            </div>
+            <div class="form-group">
+              <label for="serviceRadius">📍 Pickup range (km)</label>
+              <input type="number" id="serviceRadius" min="0.5" max="20" step="0.5" value="2" />
+              <small class="field-hint">How far you can travel to collect food. You can change this later.</small>
             </div>
           </div>
         </div>
@@ -187,6 +192,11 @@
       );
     });
     window.addEventListener('DOMContentLoaded', initMap);
+    let radiusEdited = false;
+    document.getElementById('serviceRadius').addEventListener('input', () => { radiusEdited = true; });
+    document.getElementById('receiverType').addEventListener('change', (e) => {
+      if (!radiusEdited) document.getElementById('serviceRadius').value = e.target.value === 'individual_or_family' ? 2 : 5;
+    });
     initPage({ guestOnly: true });
     document.getElementById('signupForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -220,6 +230,14 @@
         const cap = parseFloat(document.getElementById('dailyCap').value);
         if (!isNaN(cap)) payload.daily_capacity_kg = cap;
         payload.has_refrigeration = document.getElementById('hasFridge').value === 'true';
+        const radius = parseFloat(document.getElementById('serviceRadius').value);
+        if (isNaN(radius) || radius < 0.5 || radius > 20) {
+          showToast('Pickup range must be between 0.5 and 20 km.', 'error');
+          submitBtn.disabled = false;
+          submitBtn.textContent = '🚀 Complete Registration';
+          return;
+        }
+        payload.service_radius_km = radius;
       }
       try {
         const res = await apiFetch('/auth/signup', {
@@ -231,7 +249,7 @@
       } catch (err) {
         showToast(err.message, 'error');
         submitBtn.disabled = false;
-        submitBtn.textContent = '🚀 Complete Registration';
+        submitBtn.textContent = 'Complete Registration';
       }
     });
   </script>
