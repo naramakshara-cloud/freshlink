@@ -69,6 +69,3 @@ INSERT INTO food_listings (
     NOW() - INTERVAL '1 day', NOW() + INTERVAL '30 days', TRUE, 'Wheat, sugar', TRUE,
     'Ready for pickup at Block D reception', '8820'
 );
-INSERT INTO receiver_requirements (receiver_id, category_id, quantity_needed_kg) VALUES
-((SELECT receiver_id FROM receivers WHERE email='shelter@hope.org'), (SELECT category_id FROM food_categories WHERE name='Cooked Rice & Curries'), 15),
-((SELECT receiver_id FROM receivers WHERE email='shelter@hope.org'), (SELECT category_id FROM food_categories WHERE name='Breads & Rotis'), 10);

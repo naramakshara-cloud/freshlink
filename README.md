@@ -209,7 +209,7 @@ Every demo account uses the password `DemoPass123!`.
 | Donor | sharma.home@gmail.com | Sharma Household | |
 | Donor | hostel.d@college.edu | Girls Hostel Mess | |
 | Receiver | annapurna@trust.org | Annapurna Food Bank | NGO, 80 kg a day, has a fridge |
-| Receiver | shelter@hope.org | Hope Shelter | Orphanage, 30 kg a day, needs only cooked food and breads |
+| Receiver | shelter@hope.org | Hope Shelter | Orphanage, 30 kg a day |
 | Receiver | jayanagar@kitchen.org | Jayanagar Community Kitchen | 40 kg a day |
 | Receiver | paws@animalshelter.org | Paws Animal Rescue | Animal shelter, animal-safe food only |
 | Receiver | kumar.family@gmail.com | Kumar Family | Family, 5 kg a day, 2 km range |
